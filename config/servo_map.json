@@ -1,0 +1,34 @@
+{
+  "servos": [
+    {
+      "id": 1,
+      "joint": "shoulder_pan",
+      "description": "base rotation"
+    },
+    {
+      "id": 2,
+      "joint": "shoulder_lift",
+      "description": "shoulder lift"
+    },
+    {
+      "id": 3,
+      "joint": "elbow_flex",
+      "description": "elbow flex"
+    },
+    {
+      "id": 4,
+      "joint": "wrist_flex",
+      "description": "wrist pitch"
+    },
+    {
+      "id": 5,
+      "joint": "wrist_roll",
+      "description": "wrist roll"
+    },
+    {
+      "id": 6,
+      "joint": "gripper",
+      "description": "gripper"
+    }
+  ]
+}

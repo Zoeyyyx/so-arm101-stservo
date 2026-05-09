@@ -1,13 +1,14 @@
 import argparse
 import math
+from pathlib import Path
 import time
 import sys
 
-sys.path.append("..")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "vendor" / "waveshare_stservo"))
 from scservo_sdk import *
 
 BAUDRATE = 1000000
-DEVICENAME = "COM5"
 POSITION_MIN = 0
 POSITION_MAX = 4095
 
@@ -34,6 +35,7 @@ def write_position(packet_handler, scs_id, position, speed, acc):
 
 
 parser = argparse.ArgumentParser(description="Smooth small wave demo for the first installed SO-ARM servos.")
+parser.add_argument("--port", default="COM5")
 parser.add_argument("--ids", type=int, nargs="+", default=[1, 2, 3])
 parser.add_argument("--amp", type=int, default=220)
 parser.add_argument("--amp1", type=int)
@@ -56,7 +58,7 @@ for scs_id in args.ids:
     if scs_id not in [1, 2, 3, 4]:
         raise SystemExit("Only IDs 1-4 are allowed.")
 
-portHandler = PortHandler(DEVICENAME)
+portHandler = PortHandler(args.port)
 packetHandler = sms_sts(portHandler)
 
 if not portHandler.openPort():

@@ -1,8 +1,5 @@
 .venv/
-stservo-env/Lib/
-stservo-env/Scripts/
-stservo-env/Include/
-stservo-env/pyvenv.cfg
+stservo-env/
 __pycache__/
 *.py[cod]
 *.pyo
