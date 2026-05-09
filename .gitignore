@@ -1,0 +1,13 @@
+.venv/
+stservo-env/Lib/
+stservo-env/Scripts/
+stservo-env/Include/
+stservo-env/pyvenv.cfg
+__pycache__/
+*.py[cod]
+*.pyo
+*.log
+.vscode/
+.idea/
+*.tmp
+*.bak
