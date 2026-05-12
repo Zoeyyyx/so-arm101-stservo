@@ -1,34 +1,50 @@
 {
+  "robot": "SO101 follower",
+  "default_port": "COM5",
+  "baudrate": 1000000,
+  "servo_model": "STS3215",
+  "notes": [
+    "USB 只负责串口通信，舵机必须接外部电源。",
+    "一次不要把多个默认 ID=1 的新舵机同时接入总线。",
+    "ID5 wrist_roll 在当前实物上有机械限位，后续控制需要软件限幅。"
+  ],
   "servos": [
     {
       "id": 1,
       "joint": "shoulder_pan",
-      "description": "base rotation"
+      "name_cn": "底座旋转",
+      "role": "控制机械臂绕底座水平旋转"
     },
     {
       "id": 2,
       "joint": "shoulder_lift",
-      "description": "shoulder lift"
+      "name_cn": "肩关节抬升",
+      "role": "控制上臂抬升或下压"
     },
     {
       "id": 3,
       "joint": "elbow_flex",
-      "description": "elbow flex"
+      "name_cn": "肘关节弯曲",
+      "role": "控制前臂弯曲角度"
     },
     {
       "id": 4,
       "joint": "wrist_flex",
-      "description": "wrist pitch"
+      "name_cn": "腕部俯仰",
+      "role": "控制末端执行器俯仰方向"
     },
     {
       "id": 5,
       "joint": "wrist_roll",
-      "description": "wrist roll"
+      "name_cn": "腕部旋转",
+      "role": "控制末端绕自身轴线旋转",
+      "caution": "当前硬件有物理限位，IK 默认冻结该关节"
     },
     {
       "id": 6,
       "joint": "gripper",
-      "description": "gripper"
+      "name_cn": "夹爪",
+      "role": "控制夹爪开合"
     }
   ]
 }

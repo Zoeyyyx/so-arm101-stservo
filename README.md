@@ -1,82 +1,86 @@
-# SO-ARM101 STServo Workspace
+# SO-ARM101 / SO101 机械臂视觉打靶项目
 
-Windows-side STS3215 debug workspace for the SO-ARM101 project. This repository currently covers Waveshare Bus Servo Adapter (A) communication, servo ID records, and a small four-servo motion demo. It is structured to grow into later LeRobot and ROS work without mixing our code with vendor examples.
+本仓库是 SO-ARM101 / SO101 机械臂项目的 Windows 调试与后续集成工作区。当前目标不是直接上车跑 ROS，而是先把“硬件通信可靠、舵机 ID 与标定正确、LeRobot 能发送动作、URDF + IK 能求解”这条主线整理清楚，为后续接入 autolabor2.5 底盘、YOLOv8 视觉识别和 ROS 节点做准备。
 
-## Layout
+## 当前硬件
+
+- 机械臂：SO-ARM101 / SO101，6 个 STS3215 总线舵机
+- 舵机驱动板：Waveshare Bus Servo Adapter (A)
+- 调试主机：Windows 笔记本 + VSCode
+- 当前串口：`COM5`
+- 舵机波特率：`1000000`
+- 供电原则：USB 只负责串口通信，舵机必须接外部电源
+
+## 项目结构
 
 ```text
-config/                  Shared robot configuration
-docs/                    Hardware status and project notes
-tools/stservo/           Our STServo scripts
-vendor/waveshare_stservo/ Waveshare SDK and original examples
-requirements.txt         Minimal Python dependency list
+assets/urdf/                  SO101 URDF 模型
+config/                       舵机 ID、关节映射等共享配置
+docs/                         中文流程、硬件状态、标定和 ROS/IK 说明
+tools/stservo/                微雪 STServo 低层通信与排障工具
+tools/lerobot/                LeRobot 读取状态、发送动作、ID5 中位设置工具
+tools/ik/                     URDF + IK 离线求解工具
+vendor/waveshare_stservo/     微雪官方 STservo SDK，仅保留通信库
+requirements.txt              低层 STServo 工具的最小依赖
 ```
 
-More detail: [docs/project-structure.md](docs/project-structure.md)
+详细说明见 [docs/project-structure.md](docs/project-structure.md)。
 
-## Environment
+## 舵机 ID 映射
 
-Recommended local environment:
+| ID | LeRobot 关节名 | 中文含义 |
+| --- | --- | --- |
+| 1 | `shoulder_pan` | 底座旋转 |
+| 2 | `shoulder_lift` | 肩关节抬升 |
+| 3 | `elbow_flex` | 肘关节弯曲 |
+| 4 | `wrist_flex` | 腕部俯仰 |
+| 5 | `wrist_roll` | 腕部旋转 |
+| 6 | `gripper` | 夹爪 |
+
+共享配置文件：[config/servo_map.json](config/servo_map.json)。
+
+## 常用命令
+
+低层 STServo 通信检查使用 `soarm101` 环境：
 
 ```powershell
 conda activate soarm101
-python --version
 python -m pip install -r requirements.txt
-python -c "import serial; print(serial.__version__)"
+python .\tools\stservo\scan_ids.py --port COM5
+python .\tools\stservo\read_positions.py --port COM5 --count 1
+python .\tools\stservo\servo_status.py --port COM5 --id 5
 ```
 
-The current Windows debug environment used Python 3.11.15 and `pyserial==3.5`.
-
-## Hardware Snapshot
-
-- Adapter: Waveshare Bus Servo Adapter (A)
-- Servo: STS3215
-- Debug port on this laptop: `COM5`
-- Baudrate: `1000000`
-- Servo model observed by ping: `777`
-- Power: external servo power required; USB is serial communication only
-
-Current hardware state is tracked in [docs/hardware-status.md](docs/hardware-status.md).
-
-## Servo ID Map
-
-The shared ID map is stored in [config/servo_map.json](config/servo_map.json).
-
-| ID | Joint | Description |
-| --- | --- | --- |
-| 1 | shoulder_pan | base rotation |
-| 2 | shoulder_lift | shoulder lift |
-| 3 | elbow_flex | elbow flex |
-| 4 | wrist_flex | wrist pitch |
-| 5 | wrist_roll | wrist roll |
-| 6 | gripper | gripper |
-
-## Four-Servo Smooth Demo
-
-Run from the repository root:
+LeRobot 状态读取和动作发送使用 `lerobot` 环境：
 
 ```powershell
-python .\tools\stservo\smooth_wave_4.py --port COM5 --ids 1 2 3 --center3 120 --amp1 260 --amp2 220 --amp3 60 --speed 180 --acc 20 --yes
+conda activate lerobot
+python .\tools\lerobot\read_so101_observation.py --port COM5 --id soarm101_follower --count 1
+python .\tools\lerobot\send_joint_action.py --port COM5 --id soarm101_follower --max-relative 5 --set shoulder_pan=0 shoulder_lift=0 elbow_flex=0 wrist_flex=0 wrist_roll=0 gripper=0
 ```
 
-If ID3 moves toward collision, reverse the center direction:
+上面第二条默认是 dry-run，不会真正运动。确认目标安全后再追加 `--yes`。
+
+URDF + IK 求解使用 `soarm101_ik` 环境：
 
 ```powershell
-python .\tools\stservo\smooth_wave_4.py --port COM5 --ids 1 2 3 --center3 -120 --amp1 260 --amp2 220 --amp3 60 --speed 180 --acc 20 --yes
+conda activate soarm101_ik
+python .\tools\ik\solve_so101_ik.py --initial shoulder_pan=0 shoulder_lift=0 elbow_flex=0 wrist_flex=0 wrist_roll=0 --dx 0.005 --dy 0 --dz 0
 ```
 
-Do not run large-motion official write demos before mechanical assembly and calibration are complete.
+IK 脚本会输出下一步可用于 `send_joint_action.py` 的 dry-run 命令。
 
-## Collaboration
+## 安全规则
 
-Common workflow:
+- 上电前确认：驱动板 USB 模式跳线正确、外部电源电压正确、机械臂周围无阻挡。
+- 低层点动工具默认不会运动，必须加 `--yes` 才会发送动作。
+- ID5 `wrist_roll` 在当前实物上有机械限位，IK 默认冻结它，不让它参与大幅优化。
+- 不运行微雪官方大幅度写入示例；仓库中只保留我们实际使用的安全工具。
+- 发现卡滞、撞限位、异常持续旋转时，立刻断电或执行 `tools/stservo/torque_off.py`。
 
-```powershell
-git pull
-git status
-git add .
-git commit -m "Describe the change"
-git push
-```
+## 后续主线
 
-Before changing shared motion scripts, test with dry run first by omitting `--yes`.
+1. 保持六舵机通信稳定，定期用 `scan_ids.py` 和 `read_so101_observation.py` 检查。
+2. 维护 LeRobot calibration 文件，尤其是 ID5 的中位和软件限位。
+3. 用 `solve_so101_ik.py` 验证末端位置控制逻辑。
+4. 上 autolabor2.5 / Raspberry Pi 3B 后拆成 ROS 节点：视觉识别、坐标转换、IK、机械臂驱动、安全过滤。

@@ -1,39 +1,62 @@
-# Project Structure
+# 项目结构说明
 
-This repository is organized so hardware debug scripts, vendor code, and future LeRobot/ROS work do not get mixed together.
+本仓库按“硬件通信、LeRobot 控制、IK 求解、后续 ROS 集成”来划分目录。这样做的目的，是避免把临时测试脚本、官方示例和真正要复用的项目代码混在一起。
 
 ```text
 .
-├─ config/                 Shared configuration files
-├─ docs/                   Hardware notes and workflow docs
-├─ tools/stservo/          Our STServo debug and demo scripts
-├─ vendor/waveshare_stservo/
-│  ├─ scservo_sdk/         Waveshare SDK used by STS/SMS servos
-│  ├─ STservo_sdk/         Original vendor SDK variant
-│  ├─ sms_sts/             Original ST/SMS example scripts
-│  └─ scscl/               Original SC example scripts
-├─ requirements.txt
+├─ assets/
+│  └─ urdf/                    SO101 机械臂 URDF 模型
+├─ config/
+│  └─ servo_map.json           舵机 ID 与 LeRobot 关节名映射
+├─ docs/
+│  ├─ hardware-status.md       当前硬件、通信和标定状态
+│  ├─ calibration-notes.md     标定文件、ID5 限位、中位设置说明
+│  ├─ project-structure.md     本文件
+│  └─ ros_ik_framework.md      后续 ROS + IK + 视觉节点框架
+├─ tools/
+│  ├─ stservo/                 微雪 STServo 低层工具
+│  ├─ lerobot/                 LeRobot 读取状态和发送动作工具
+│  └─ ik/                      URDF + IK 离线求解工具
+├─ vendor/
+│  └─ waveshare_stservo/
+│     └─ STservo_sdk/          微雪官方 ST 系列舵机通信 SDK
+├─ requirements.txt            低层 STServo 工具最小依赖
 └─ README.md
 ```
 
-## Rules
+## tools/stservo
 
-- Put our own reusable scripts in `tools/`.
-- Keep vendor files under `vendor/`.
-- Put hardware state and procedure notes in `docs/`.
-- Put shared robot configuration in `config/`.
-- Do not commit virtual environments, cache files, videos, or large logs.
+这一层只处理“舵机总线是否通、ID 是否在线、原始位置是否能读、必要时关闭扭矩”。它不依赖 LeRobot，也不做复杂控制。
 
-## Future Folders
+保留工具：
 
-When LeRobot work begins, add a dedicated folder such as:
+- `scan_ids.py`：扫描 1-6 号舵机是否在线。
+- `read_positions.py`：读取原始位置和速度。
+- `servo_status.py`：读取单个舵机模式、扭矩、电压、温度、位置。
+- `torque_off.py`：关闭一个或多个舵机扭矩。
+- `jog_servo.py`：低层单舵机小幅点动，仅用于排障。
+- `stservo_common.py`：以上脚本共用的 SDK 加载和串口打开逻辑。
 
-```text
-lerobot/
-```
+## tools/lerobot
 
-When ROS integration begins, add a dedicated workspace/package area such as:
+这一层使用 LeRobot 的 SO101 follower 封装，所有角度和夹爪值都经过 LeRobot calibration。
 
-```text
-ros/
-```
+保留工具：
+
+- `read_so101_observation.py`：读取 LeRobot 关节状态。
+- `send_joint_action.py`：发送一个或多个关节目标，默认 dry-run。
+- `set_wrist_roll_center.py`：重新设置 ID5 / `wrist_roll` 中位和软件限位。
+
+## tools/ik
+
+这一层先在 Windows 上验证 URDF + IK，不直接控制硬件。
+
+保留工具：
+
+- `solve_so101_ik.py`：输入当前关节角和末端偏移，输出 LeRobot 关节目标。
+
+## vendor
+
+`vendor/waveshare_stservo/STservo_sdk` 是微雪官方 ST 系列舵机通信库。项目代码只调用它，不修改底层通信协议。
+
+旧的官方示例脚本已经删除，因为它们容易绕过我们的安全开关，也会让团队误以为应该直接运行大幅度写入 demo。

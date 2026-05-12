@@ -1,0 +1,8 @@
+# 统一文本文件行尾，减少 Windows 协作时的 LF/CRLF 提示。
+* text=auto
+
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.txt text eol=lf
+*.urdf text eol=lf
