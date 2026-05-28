@@ -1,0 +1,91 @@
+{
+  "serial": {
+    "port": "COM5",
+    "baudrate": 1000000
+  },
+  "urdf": "assets/urdf/so101_new_calib.urdf",
+  "frames": {
+    "input_frame": "world",
+    "robot_base_frame": "so101_base",
+    "note": "当前模板默认把输入坐标当作机械臂基座坐标；后续接相机/ROS 时在 transform_target_pose_to_base() 中替换为真实 TF。"
+  },
+  "motion": {
+    "steps": 30,
+    "dt": 0.04,
+    "speed": 120,
+    "acc": 8,
+    "startup_recovery_speed": 80,
+    "startup_recovery_acc": 4
+  },
+  "workspace": {
+    "joint_safe_ratio": 0.95,
+    "sample_count_per_joint": 5,
+    "aabb_margin_m": 0.0,
+    "position_error_max_mm": 10.0,
+    "allow_startup_recovery_from_outside_safe_envelope": true,
+    "note": "安全工作空间由标定关节范围收缩到 95% 后，通过 URDF 正运动学采样得到。这里的 95% 是关节可用范围，不是单次动作比例。"
+  },
+  "ik": {
+    "max_iter": 200,
+    "limit_margin_deg": 0.5,
+    "use_wrist_roll": false,
+    "orientation_policy": "placeholder_position_first"
+  },
+  "notes": [
+    "raw_min/raw_max 与 angle_min_deg/angle_max_deg 是角度到 STS3215 原始位置的线性映射模板。",
+    "这些数值需要和当前 LeRobot calibration、实际装配方向、机械限位核对后再用于真实运动。",
+    "ID5 wrist_roll 当前硬件有机械限位，默认不参与 IK 大幅优化。",
+    "LeRobot 标定有用：这里的 raw_min/raw_max 应该来自或对齐 LeRobot calibration；本模板会从这些标定范围派生 95% 安全关节包络。",
+    "上电初始姿态可能在 95% 安全包络外。只要目标 IK 结果在安全包络内，程序允许执行恢复轨迹，把机械臂带回可用工作区。"
+  ],
+  "joints": [
+    {
+      "name": "shoulder_pan",
+      "id": 1,
+      "angle_min_deg": -110.0,
+      "angle_max_deg": 110.0,
+      "raw_min": 716,
+      "raw_max": 3393
+    },
+    {
+      "name": "shoulder_lift",
+      "id": 2,
+      "angle_min_deg": -100.0,
+      "angle_max_deg": 100.0,
+      "raw_min": 899,
+      "raw_max": 3250
+    },
+    {
+      "name": "elbow_flex",
+      "id": 3,
+      "angle_min_deg": -96.83,
+      "angle_max_deg": 96.83,
+      "raw_min": 870,
+      "raw_max": 3075
+    },
+    {
+      "name": "wrist_flex",
+      "id": 4,
+      "angle_min_deg": -95.0,
+      "angle_max_deg": 95.0,
+      "raw_min": 907,
+      "raw_max": 3277
+    },
+    {
+      "name": "wrist_roll",
+      "id": 5,
+      "angle_min_deg": -45.0,
+      "angle_max_deg": 15.0,
+      "raw_min": 1535,
+      "raw_max": 2218
+    },
+    {
+      "name": "gripper",
+      "id": 6,
+      "angle_min_deg": 0.0,
+      "angle_max_deg": 100.0,
+      "raw_min": 1512,
+      "raw_max": 2980
+    }
+  ]
+}

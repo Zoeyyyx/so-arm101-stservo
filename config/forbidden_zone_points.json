@@ -1,0 +1,218 @@
+{
+  "timestamp": "2026-05-26T20:30:00+08:00",
+  "updated_at": "2026-05-26T23:12:14+08:00",
+  "robot_id": "soarm101_follower",
+  "port": "COM5",
+  "frame": "so101_base",
+  "note": "人工记录的危险边界点，仅用于生成简化禁入区域；不是精确碰撞模型。",
+  "samples": [
+    {
+      "index": 1,
+      "timestamp": "2026-05-26T23:10:20+08:00",
+      "label": "base_collision_boundary",
+      "joint_angles_deg": {
+        "shoulder_pan": 90.35861,
+        "shoulder_lift": -61.293067,
+        "elbow_flex": 62.138073,
+        "wrist_flex": 88.025316,
+        "wrist_roll": 99.860908,
+        "gripper": -1.430518
+      },
+      "raw_position": {
+        "shoulder_pan": 3154,
+        "shoulder_lift": 1354,
+        "elbow_flex": 2680,
+        "wrist_flex": 3190,
+        "wrist_roll": 3184,
+        "gripper": 1491
+      },
+      "end_effector_position": {
+        "x": 0.030317,
+        "y": -0.084354,
+        "z": 0.039266
+      }
+    },
+    {
+      "index": 2,
+      "timestamp": "2026-05-26T23:10:30+08:00",
+      "label": "base_collision_boundary",
+      "joint_angles_deg": {
+        "shoulder_pan": 90.276429,
+        "shoulder_lift": -102.041684,
+        "elbow_flex": 59.942381,
+        "wrist_flex": 94.599156,
+        "wrist_roll": 99.860908,
+        "gripper": -1.430518
+      },
+      "raw_position": {
+        "shoulder_pan": 3153,
+        "shoulder_lift": 875,
+        "elbow_flex": 2655,
+        "wrist_flex": 3272,
+        "wrist_roll": 3184,
+        "gripper": 1491
+      },
+      "end_effector_position": {
+        "x": 0.03032,
+        "y": -0.108908,
+        "z": 0.089197
+      }
+    },
+    {
+      "index": 3,
+      "timestamp": "2026-05-26T23:10:39+08:00",
+      "label": "base_collision_boundary",
+      "joint_angles_deg": {
+        "shoulder_pan": 31.845349,
+        "shoulder_lift": -34.325819,
+        "elbow_flex": 65.036385,
+        "wrist_flex": 82.092827,
+        "wrist_roll": 99.948755,
+        "gripper": -1.430518
+      },
+      "raw_position": {
+        "shoulder_pan": 2442,
+        "shoulder_lift": 1671,
+        "elbow_flex": 2713,
+        "wrist_flex": 3116,
+        "wrist_roll": 3185,
+        "gripper": 1491
+      },
+      "end_effector_position": {
+        "x": 0.075461,
+        "y": -0.032153,
+        "z": 0.013683
+      }
+    },
+    {
+      "index": 4,
+      "timestamp": "2026-05-26T23:10:48+08:00",
+      "label": "base_collision_boundary",
+      "joint_angles_deg": {
+        "shoulder_pan": 32.091894,
+        "shoulder_lift": -101.871544,
+        "elbow_flex": 60.293692,
+        "wrist_flex": 93.396624,
+        "wrist_roll": 99.685212,
+        "gripper": -1.430518
+      },
+      "raw_position": {
+        "shoulder_pan": 2445,
+        "shoulder_lift": 877,
+        "elbow_flex": 2659,
+        "wrist_flex": 3257,
+        "wrist_roll": 3182,
+        "gripper": 1491
+      },
+      "end_effector_position": {
+        "x": 0.128866,
+        "y": -0.065894,
+        "z": 0.089816
+      }
+    },
+    {
+      "index": 5,
+      "timestamp": "2026-05-26T23:11:03+08:00",
+      "label": "base_collision_boundary",
+      "joint_angles_deg": {
+        "shoulder_pan": -30.612626,
+        "shoulder_lift": -50.148873,
+        "elbow_flex": 74.960912,
+        "wrist_flex": 76.160338,
+        "wrist_roll": 98.455344,
+        "gripper": -1.430518
+      },
+      "raw_position": {
+        "shoulder_pan": 1682,
+        "shoulder_lift": 1485,
+        "elbow_flex": 2826,
+        "wrist_flex": 3042,
+        "wrist_roll": 3168,
+        "gripper": 1491
+      },
+      "end_effector_position": {
+        "x": 0.092165,
+        "y": 0.02224,
+        "z": 0.001834
+      }
+    },
+    {
+      "index": 6,
+      "timestamp": "2026-05-26T23:11:15+08:00",
+      "label": "base_collision_boundary",
+      "joint_angles_deg": {
+        "shoulder_pan": -30.612626,
+        "shoulder_lift": -101.956614,
+        "elbow_flex": 65.914662,
+        "wrist_flex": 90.350211,
+        "wrist_roll": 98.63104,
+        "gripper": -1.430518
+      },
+      "raw_position": {
+        "shoulder_pan": 1682,
+        "shoulder_lift": 876,
+        "elbow_flex": 2723,
+        "wrist_flex": 3219,
+        "wrist_roll": 3170,
+        "gripper": 1491
+      },
+      "end_effector_position": {
+        "x": 0.141214,
+        "y": 0.051266,
+        "z": 0.075525
+      }
+    },
+    {
+      "index": 7,
+      "timestamp": "2026-05-26T23:11:29+08:00",
+      "label": "base_collision_boundary",
+      "joint_angles_deg": {
+        "shoulder_pan": -102.603661,
+        "shoulder_lift": -32.369205,
+        "elbow_flex": 65.299868,
+        "wrist_flex": 76.400844,
+        "wrist_roll": 98.191801,
+        "gripper": -1.430518
+      },
+      "raw_position": {
+        "shoulder_pan": 806,
+        "shoulder_lift": 1694,
+        "elbow_flex": 2716,
+        "wrist_flex": 3045,
+        "wrist_roll": 3165,
+        "gripper": 1491
+      },
+      "end_effector_position": {
+        "x": 0.034001,
+        "y": 0.058384,
+        "z": 0.00713
+      }
+    },
+    {
+      "index": 8,
+      "timestamp": "2026-05-26T23:11:37+08:00",
+      "label": "base_collision_boundary",
+      "joint_angles_deg": {
+        "shoulder_pan": -102.685842,
+        "shoulder_lift": -101.956614,
+        "elbow_flex": 72.413909,
+        "wrist_flex": 82.814346,
+        "wrist_roll": 98.367496,
+        "gripper": -1.430518
+      },
+      "raw_position": {
+        "shoulder_pan": 805,
+        "shoulder_lift": 876,
+        "elbow_flex": 2797,
+        "wrist_flex": 3125,
+        "wrist_roll": 3167,
+        "gripper": 1491
+      },
+      "end_effector_position": {
+        "x": 0.019146,
+        "y": 0.123982,
+        "z": 0.064683
+      }
+    }
+  ]
+}

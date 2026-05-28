@@ -1,0 +1,127 @@
+{
+  "controller_config": "config/absolute_pose_control.json",
+  "home_pose_config": "config/home_pose.json",
+  "ready_pose_config": "config/ready_pose.json",
+  "frames": {
+    "default_target_frame": "so101_base",
+    "robot_base_frame": "so101_base",
+    "cart_ground_frame": "cart_ground"
+  },
+  "mobile_base_mount": {
+    "base_offset_x_m": 0.0,
+    "base_offset_y_m": 0.0,
+    "base_height_above_ground_m": 0.0,
+    "note": "如果视觉输出的是小车/地面坐标，可用 cart_ground frame，并在这里填写机械臂基座相对小车地面的安装偏移。"
+  },
+  "tool_orientation": {
+    "enforce_tool_down": true,
+    "tool_down_phases": [
+      "strike_down"
+    ],
+    "orientation_mode": "Z",
+    "target_axis_in_base": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "max_orientation_error_deg": 35.0,
+    "position_first_fallback": true,
+    "fallback_position_error_ratio": 2.0,
+    "hard_reject_orientation_error": false,
+    "default_wrist_roll_deg": -15.0,
+    "note": "位置优先：默认在接近和击打阶段尝试约束工具轴向下。若姿态约束导致位置误差变大，会回退到位置 IK；姿态误差作为日志提示。"
+  },
+  "home_pose": {
+    "enabled": true,
+    "return_after_hit": true,
+    "allow_outside_safe_envelope": true,
+    "start_tolerance_deg": 8.0,
+    "joint_angles_deg": {
+      "shoulder_pan": 2.013,
+      "shoulder_lift": -89.196,
+      "elbow_flex": 87.872,
+      "wrist_flex": 48.903,
+      "wrist_roll": -77.328,
+      "gripper": 1.431
+    },
+    "note": "收起/home 位姿使用关节角表示，单位度。home 是实测安全停放姿态，默认允许位于 95% 工作安全包络外；打靶轨迹本身仍会检查安全包络。"
+  },
+  "hit_action": {
+    "strike_height_m": 0.08,
+    "min_strike_height_m": 0.06,
+    "contact_offset_m": 0.0,
+    "pre_strike_dwell_s": 0.6,
+    "hit_hold_s": 0.2,
+    "dwell_s": 0.2,
+    "after_rise_dwell_s": 0.2,
+    "max_joint_step_deg": 4.0,
+    "max_cartesian_phase_steps": 80,
+    "approach_error_max_mm": 15.0,
+    "strike_error_max_mm": 15.0,
+    "default_gripper": 5.0,
+    "sync_write": false,
+    "strict_servo_wait": false,
+    "debug_visible_strike": true,
+    "debug_visible_wait_phases": [
+      "approach_above_target",
+      "strike_down",
+      "return_strike_down"
+    ],
+    "strict_servo_wait_phases": [
+      "approach_above_target",
+      "strike_down",
+      "return_strike_down",
+      "return_approach_above_target",
+      "return_move_to_ready",
+      "return_home"
+    ],
+    "wait_raw_tolerance": 45,
+    "wait_timeout_s": 1.2,
+    "wait_timeout_policy": "warn",
+    "wait_poll_interval_s": 0.02,
+    "phases": {
+      "approach_above_target": {
+        "steps": 8,
+        "dt": 0.09,
+        "speed": 70,
+        "acc": 8
+      },
+      "move_to_ready": {
+        "steps": 80,
+        "dt": 0.07,
+        "speed": 55,
+        "acc": 5
+      },
+      "strike_down": {
+        "steps": 28,
+        "dt": 0.045,
+        "speed": 220,
+        "acc": 25
+      },
+      "return_strike_down": {
+        "steps": 28,
+        "dt": 0.055,
+        "speed": 160,
+        "acc": 18
+      },
+      "return_approach_above_target": {
+        "steps": 8,
+        "dt": 0.08,
+        "speed": 65,
+        "acc": 8
+      },
+      "return_move_to_ready": {
+        "steps": 80,
+        "dt": 0.07,
+        "speed": 55,
+        "acc": 5
+      },
+      "return_home": {
+        "steps": 1,
+        "dt": 0.07,
+        "speed": 55,
+        "acc": 5
+      }
+    }
+  }
+}

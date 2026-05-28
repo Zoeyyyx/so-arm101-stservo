@@ -11,6 +11,7 @@
 2. LeRobot 机械臂驱动
    - 工具：`tools/lerobot/read_so101_observation.py`
    - 工具：`tools/lerobot/send_joint_action.py`
+   - 工具：`tools/lerobot/send_ik_delta.py`
    - 目的：使用 LeRobot calibration 读取关节角，并调用 `robot.send_action()` 发送目标。
 
 3. URDF + IK 求解
@@ -39,6 +40,7 @@
 4. `so101_arm_driver_node`
    - 订阅：关节目标
    - 调用：LeRobot `robot.send_action()`
+   - 或调用：`tools/arm_control/send_absolute_pose_template.py` 中的微雪总线发送逻辑
    - 发布：当前关节状态
 
 5. `safety_filter_node`
@@ -47,7 +49,20 @@
 
 ## 当前 Windows 测试流程
 
-先读取当前机械臂关节角：
+最简调试方式是直接使用一键脚本。它会自动读取当前姿态、求 IK、生成目标并 dry-run：
+
+```powershell
+conda activate lerobot
+python .\tools\lerobot\send_ik_delta.py --port COM5 --id soarm101_follower --dx 0.005 --dy 0 --dz 0
+```
+
+确认输出目标安全后再加 `--yes`：
+
+```powershell
+python .\tools\lerobot\send_ik_delta.py --port COM5 --id soarm101_follower --dx 0.005 --dy 0 --dz 0 --yes
+```
+
+如果需要分步排查，再读取当前机械臂关节角：
 
 ```powershell
 conda activate lerobot
@@ -70,6 +85,44 @@ python .\tools\lerobot\send_joint_action.py --port COM5 --id soarm101_follower -
 
 确认目标角度和机械空间安全后，再加 `--yes`。
 
+如果要测试“绝对目标位姿 -> 微雪总线舵机指令”的模板，可以先 dry-run：
+
+```powershell
+python .\tools\arm_control\send_absolute_pose_template.py --x 0.30 --y 0 --z 0.20 --roll 0 --pitch 0 --yaw 0
+```
+
+查看由标定关节范围派生的安全工作空间：
+
+```powershell
+python .\tools\arm_control\send_absolute_pose_template.py --show-workspace
+```
+
+真实控制链路应保持为：目标绝对坐标 -> 坐标系转换 -> 工作空间判断 -> IK 求解 -> 95% 关节安全包络检查 -> 平滑轨迹 -> 舵机执行。这里的 95% 是每个关节标定范围两端留余量后的可用范围，不是限制单次动作幅度。
+
+## 打靶动作节点雏形
+
+地面打靶动作程序：
+
+```powershell
+python .\tools\arm_control\hit_target_action.py --port COM5 --x 0.25 --y 0 --z 0.02
+```
+
+它面向后续视觉节点输出的靶心坐标，控制链路是：
+
+1. 视觉识别输出靶心点。
+2. 坐标转换节点把靶心点转换到 `so101_base`。
+3. 打靶动作程序生成 hover、快速接近、减速击打、停留和离开轨迹。
+4. 每个轨迹点都经过工作空间、IK、95% 关节包络和误差检查。
+5. 加 `--yes` 后才通过微雪总线执行。
+
+如果视觉输出的是小车地面坐标，可以先使用：
+
+```powershell
+python .\tools\arm_control\hit_target_action.py --frame cart_ground --x 0.25 --y 0 --z 0
+```
+
+然后在 `config/hit_action.json` 里填写机械臂基座相对小车的安装高度和偏移。
+
 ## 后续接视觉时要补的关键问题
 
 - 相机标定：得到相机内参。
@@ -83,4 +136,3 @@ python .\tools\lerobot\send_joint_action.py --port COM5 --id soarm101_follower -
 - Windows 上 LeRobot 的 `placo` 后端存在 DLL 导入问题，当前使用 `ikpy` 先跑通 URDF + IK。
 - ID5 `wrist_roll` 有物理限位，当前 IK 默认冻结它。
 - Raspberry Pi 3B 算力有限，YOLOv8 后续可能需要轻量模型或外部上位机协同。
-

@@ -16,7 +16,8 @@
 ├─ tools/
 │  ├─ stservo/                 微雪 STServo 低层工具
 │  ├─ lerobot/                 LeRobot 读取状态和发送动作工具
-│  └─ ik/                      URDF + IK 离线求解工具
+│  ├─ ik/                      URDF + IK 离线求解工具
+│  └─ arm_control/             末端绝对坐标控制模板
 ├─ vendor/
 │  └─ waveshare_stservo/
 │     └─ STservo_sdk/          微雪官方 ST 系列舵机通信 SDK
@@ -54,6 +55,15 @@
 保留工具：
 
 - `solve_so101_ik.py`：输入当前关节角和末端偏移，输出 LeRobot 关节目标。
+
+## tools/arm_control
+
+这一层是后续 ROS 机械臂驱动节点的模板雏形，负责把绝对目标位姿转换成舵机指令。
+
+保留工具：
+
+- `send_absolute_pose_template.py`：输入 `x/y/z/roll/pitch/yaw`，先用标定关节范围的 95% 生成安全关节包络和末端工作空间，再做 IK、关节极限检查、平滑插值，并通过微雪总线发送到 STS3215。默认 dry-run。
+- `hit_target_action.py`：面向地面靶位的动作程序，保持 X/Y 为靶心，沿 Z 方向执行 hover、快速接近、减速击打、停留和离开轨迹。默认 dry-run。
 
 ## vendor
 

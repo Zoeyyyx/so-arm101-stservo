@@ -1,0 +1,18 @@
+{
+  "type": "cylinder",
+  "frame": "so101_base",
+  "center": [
+    0.0,
+    0.0
+  ],
+  "radius": 0.170232,
+  "z_min": -0.022617,
+  "z_max": 0.109816,
+  "safety_margin": 0.02,
+  "z_margin": 0.02,
+  "source": "manual_recorded_boundary",
+  "source_file": "C:\\A_projects\\260302_ROS_Logistics_Trolley\\MechanicalArm\\STServo_Python\\config\\forbidden_zone_points.json",
+  "created_at": "2026-05-26T23:14:45+08:00",
+  "sample_count": 9,
+  "note": "简化圆柱禁入区，只检查末端点；不等价于完整碰撞检测。"
+}
