@@ -71,6 +71,9 @@ def build_parser():
         choices=["warn", "error"],
         help="到位等待超时时的处理方式：warn=警告后继续，error=中断。",
     )
+    parser.add_argument("--command-raw-deadband", type=int, help="执行层 raw 死区，小于该变化不重复下发。")
+    parser.add_argument("--min-joint-raw-step", type=int, help="规划层最小 raw 步长，小于该变化的中间点会被合并。")
+    parser.add_argument("--no-skip-unchanged", action="store_true", help="不跳过 raw 目标未明显变化的轨迹帧。")
     parser.add_argument("--sync-write", action="store_true", help="开启 SyncWrite 同步写入；默认使用普通逐舵机写入。")
     parser.add_argument("--no-sync-write", action="store_true", help="关闭 SyncWrite。")
     parser.add_argument("--show-workspace", action="store_true", help="只打印安全包络和工作空间，不连接舵机。")
@@ -119,6 +122,12 @@ def apply_runtime_overrides(controller, args):
         hit_config["hit_action"]["wait_timeout_s"] = args.wait_timeout
     if args.wait_timeout_policy is not None:
         hit_config["hit_action"]["wait_timeout_policy"] = args.wait_timeout_policy
+    if args.command_raw_deadband is not None:
+        hit_config["hit_action"]["command_raw_deadband"] = args.command_raw_deadband
+    if args.min_joint_raw_step is not None:
+        hit_config["hit_action"]["min_joint_raw_step"] = args.min_joint_raw_step
+    if args.no_skip_unchanged:
+        hit_config["hit_action"]["skip_unchanged_points"] = False
     if args.sync_write:
         hit_config["hit_action"]["sync_write"] = True
     if args.no_sync_write:
@@ -135,6 +144,20 @@ def print_state(state):
 def print_trajectory_summary(result, controller=None):
     """打印规划轨迹摘要。"""
     from core.trajectory_planner import max_adjacent_joint_delta, max_joint_delta_degrees, phase_position_error_limit_mm
+
+    def raw_delta_report(points, joints, raw_deadband):
+        deltas = []
+        for previous, current in zip(points, points[1:]):
+            for joint in joints:
+                deltas.append(abs(int(current.raw[joint]) - int(previous.raw[joint])))
+        nonzero = [delta for delta in deltas if delta > 0]
+        return {
+            "max": max(deltas) if deltas else 0,
+            "min_nonzero": min(nonzero) if nonzero else 0,
+            "small_nonzero": sum(1 for delta in nonzero if delta < int(raw_deadband)),
+            "zero": sum(1 for delta in deltas if delta == 0),
+            "total": len(deltas),
+        }
 
     return_policy = result.diagnostics.get("return_policy")
     if return_policy:
@@ -178,16 +201,22 @@ def print_trajectory_summary(result, controller=None):
             print(f"  first_mismatch={strike_contract['first_mismatch']}")
     adaptive_steps = result.diagnostics.get("adaptive_cartesian_steps")
     if adaptive_steps:
-        print("笛卡尔阶段自动加密记录:")
+        print("轨迹阶段加密/简化记录:")
         for phase, attempts in adaptive_steps.items():
             if not attempts:
                 continue
             last = attempts[-1]
-            print(
-                f"  {phase}: final_steps={last['steps']} "
-                f"max_step_delta={last['max_step_delta_deg']:.3f} deg "
-                f"attempts={attempts}"
-            )
+            if last.get("mode") == "single_ik_then_joint_space":
+                print(
+                    f"  {phase}: mode=single_ik_then_joint_space "
+                    f"points={last['points']} ik_error={float(last['ik_error_mm']):.3f} mm"
+                )
+            else:
+                print(
+                    f"  {phase}: final_steps={last['steps']} "
+                    f"max_step_delta={last['max_step_delta_deg']:.3f} deg "
+                    f"attempts={attempts}"
+                )
 
     print("打靶末端位姿:")
     for name, pose in result.poses.items():
@@ -220,6 +249,9 @@ def print_trajectory_summary(result, controller=None):
                 controller.controller_config,
                 phase_for_limit,
             )
+        command_joints = controller.hit_config["hit_action"].get("command_joints", ALL_JOINTS) if controller else ALL_JOINTS
+        raw_deadband = controller.hit_config["hit_action"].get("command_raw_deadband", 0) if controller else 0
+        raw_report = raw_delta_report(points, command_joints, raw_deadband)
         print(
             f"  {phase:22s} points={len(points):3d} "
             f"speed={points[-1].speed:3d} acc={points[-1].acc:2d} dt={points[-1].dt:.3f} "
@@ -227,6 +259,12 @@ def print_trajectory_summary(result, controller=None):
             f"max_step_delta={max_adjacent_joint_delta(points):.3f}deg "
             f"phase_delta={phase_delta:.3f}deg max_pos_err={max_position_error:.3f}mm"
             + (f" limit={error_limit:.3f}mm" if error_limit is not None else "")
+        )
+        print(
+            f"  {'':22s} raw_delta max={raw_report['max']} "
+            f"min_nonzero={raw_report['min_nonzero']} "
+            f"small<{raw_deadband}={raw_report['small_nonzero']} "
+            f"zero={raw_report['zero']}/{raw_report['total']}"
         )
         if finite_z:
             print(f"  {'':22s} z={min(finite_z):.4f}..{max(finite_z):.4f} m")
@@ -321,7 +359,11 @@ def main():
             f"debug_visible_strike={controller.hit_config['hit_action'].get('debug_visible_strike', False)} "
             f"wait_raw_tolerance={controller.hit_config['hit_action'].get('wait_raw_tolerance', 25)} "
             f"wait_timeout_s={controller.hit_config['hit_action'].get('wait_timeout_s', 0.8)} "
-            f"wait_timeout_policy={controller.hit_config['hit_action'].get('wait_timeout_policy', 'warn')}"
+            f"wait_timeout_policy={controller.hit_config['hit_action'].get('wait_timeout_policy', 'warn')} "
+            f"command_joints={controller.hit_config['hit_action'].get('command_joints')} "
+            f"command_raw_deadband={controller.hit_config['hit_action'].get('command_raw_deadband', 0)} "
+            f"send_full_active_joint_frame={controller.hit_config['hit_action'].get('send_full_active_joint_frame', True)} "
+            f"skip_unchanged_points={controller.hit_config['hit_action'].get('skip_unchanged_points', False)}"
         )
 
         if not args.yes:

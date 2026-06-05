@@ -12,11 +12,15 @@ from core.types import ACTIVE_JOINTS, ALL_JOINTS, PASSIVE_JOINTS, MotionProfile,
 def phase_profile(hit_config, phase_name) -> MotionProfile:
     """读取一个阶段的运动参数。"""
     profile = hit_config["hit_action"]["phases"][phase_name]
+    action = hit_config.get("hit_action", {})
+    dt = float(profile["dt"])
+    if int(profile["speed"]) <= int(action.get("low_speed_dt_threshold", 120)):
+        dt = max(dt, float(action.get("min_low_speed_dt_s", 0.06)))
     return MotionProfile(
         steps=int(profile["steps"]),
         speed=int(profile["speed"]),
         acc=int(profile["acc"]),
-        dt=float(profile["dt"]),
+        dt=dt,
     )
 
 
@@ -58,6 +62,11 @@ def max_phase_joint_delta(start_angles, points):
         max_delta = max(max_delta, max_joint_delta_degrees(previous_angles, point.angles))
         previous_angles = point.angles
     return max_delta
+
+
+def max_raw_delta_between(previous_raw, current_raw, joints=ACTIVE_JOINTS):
+    """计算两个 raw 目标之间主动关节的最大变化。"""
+    return max(abs(int(current_raw[joint]) - int(previous_raw[joint])) for joint in joints)
 
 
 def compare_reversed_points(forward_points, reverse_points, joints=ALL_JOINTS):
@@ -423,8 +432,11 @@ class HitTrajectoryPlanner:
         """关节空间插值阶段，不做笛卡尔 IK。"""
         profile = phase_profile(self.hit_config, phase_name)
         steps = adaptive_steps(int(profile.steps), start_angles, target_angles, self.hit_config)
+        min_raw_step = int(self.hit_config["hit_action"].get("min_joint_raw_step", 4))
         current_seed = dict(start_angles)
-        for point_index, angles in enumerate(interpolate_joint_angles_smooth(start_angles, target_angles, steps), start=1):
+        previous_raw = target_raw_from_angles(start_angles, self.controller_config)
+        path = interpolate_joint_angles_smooth(start_angles, target_angles, steps)
+        for point_index, angles in enumerate(path, start=1):
             joint_violations = self.safety_checker.validate_target_angles(angles)
             if joint_violations:
                 detail = "\n".join(
@@ -433,7 +445,12 @@ class HitTrajectoryPlanner:
                 )
                 return current_seed, f"{phase_name} 第 {point_index} 个关节插值点越界：\n{detail}"
             point_pose = self.ik_solver.fk_pose(angles, pose_template)
-            trajectory.append(self.exact_joint_point(phase_name, point_pose, angles, profile))
+            point = self.exact_joint_point(phase_name, point_pose, angles, profile)
+            is_last_point = point_index == len(path)
+            raw_delta = max_raw_delta_between(previous_raw, point.raw)
+            if is_last_point or min_raw_step <= 0 or raw_delta >= min_raw_step:
+                trajectory.append(point)
+                previous_raw = point.raw
             current_seed = angles
         return current_seed, None
 
@@ -444,6 +461,8 @@ class HitTrajectoryPlanner:
         phase_start = len(trajectory)
         max_error_mm = phase_position_error_limit_mm(self.hit_config, self.controller_config, phase_name)
         default_max_iter = int(self.controller_config["ik"].get("max_iter", 200))
+        min_raw_step = int(self.hit_config["hit_action"].get("min_joint_raw_step", 4))
+        previous_raw = target_raw_from_angles(seed_angles, self.controller_config)
         for point_index, pose in enumerate(poses, start=1):
             last_success = trajectory[-1].angles if len(trajectory) > phase_start else current_seed
             attempts = [
@@ -509,7 +528,12 @@ class HitTrajectoryPlanner:
             )
             if reason:
                 return current_seed, reason
-            trajectory.append(self.make_point(phase_name, pose, angles, debug, profile))
+            point = self.make_point(phase_name, pose, angles, debug, profile)
+            is_boundary_point = point_index == 1 or point_index == len(poses)
+            raw_delta = max_raw_delta_between(previous_raw, point.raw)
+            if is_boundary_point or min_raw_step <= 0 or raw_delta >= min_raw_step:
+                trajectory.append(point)
+                previous_raw = point.raw
             current_seed = angles
         return current_seed, None
 
@@ -656,22 +680,48 @@ class HitTrajectoryPlanner:
         move_to_ready_points = list(trajectory[ready_start:])
 
         approach_start = len(trajectory)
-        def approach_poses_factory(steps):
-            if int(steps) <= 1:
-                return [poses["above_target"]]
-            return interpolate_pose_xyz(ready_pose, poses["above_target"], steps)
-
-        seed, reason, phase_adaptive = self.append_adaptive_cartesian_phase(
+        try:
+            above_angles, above_debug = self.ik_solver.solve(
+                poses["above_target"],
+                seed,
+                self.hit_config,
+                gripper_target,
+                "approach_above_target",
+                force_position_only=True,
+            )
+        except Exception as exc:  # noqa: BLE001 - 返回 PlanResult 供 CLI/ROS 处理。
+            return PlanResult(False, f"approach_above_target 单点 IK 求解失败：{exc}", trajectory, poses)
+        reason = self.safety_checker.validate_solution(
+            "approach_above_target",
+            1,
+            poses["above_target"],
+            above_angles,
+            above_debug,
+            max_position_error_mm=phase_position_error_limit_mm(
+                self.hit_config,
+                self.controller_config,
+                "approach_above_target",
+            ),
+        )
+        if reason:
+            return PlanResult(False, reason, trajectory, poses)
+        seed, reason = self.append_joint_phase(
             trajectory,
             "approach_above_target",
-            approach_poses_factory,
             seed,
-            gripper_target,
+            above_angles,
+            poses["above_target"],
         )
-        adaptive_diagnostics["approach_above_target"] = phase_adaptive
         if reason:
             return PlanResult(False, reason, trajectory, poses)
         approach_points = list(trajectory[approach_start:])
+        adaptive_diagnostics["approach_above_target"] = [
+            {
+                "mode": "single_ik_then_joint_space",
+                "points": len(approach_points),
+                "ik_error_mm": above_debug.get("position_error_mm"),
+            }
+        ]
         home_points = [home_point]
         outbound_points = home_points + move_to_ready_points + approach_points
 
