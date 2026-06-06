@@ -1,0 +1,118 @@
+# 井字棋机械臂落点配置
+# 格子编号与视觉/策略一致：
+#   0 1 2
+#   3 4 5
+#   6 7 8
+#
+# 当前 x/y 来自 A4 横向棋盘参数，单位已从 mm 转成 m。
+# 原始点位：
+#   cell 0: (240,  40) mm
+#   cell 1: (240,   0) mm
+#   cell 2: (240, -40) mm
+#   cell 3: (190,  40) mm
+#   cell 4: (190,   0) mm
+#   cell 5: (190, -40) mm
+#   cell 6: (150,  40) mm
+#   cell 7: (150,   0) mm
+#   cell 8: (150, -40) mm
+#
+# z_press 是击打接触点，z_above 是下击前上方点。
+# 这两个高度必须结合实际纸面/底盘安装高度标定后再填写。
+
+robot:
+  port: COM5
+  baudrate: 1000000
+  frame: so101_base
+  hit_config: config/hit_action.json
+  home_config: config/home_pose.json
+  ready_config: config/ready_pose.json
+
+motion:
+  default_strike_height: 0.10
+
+safe:
+  dry_run_default: true
+  require_execute_flag: true
+
+cells:
+  0:
+    x: 0.240
+    y: 0.040
+    z_above: 0.110
+    z_press: 0.010
+    roll: 0.0
+    pitch: 0.0
+    yaw: 0.0
+    label: "top_left"
+  1:
+    x: 0.240
+    y: 0.000
+    z_above: 0.110
+    z_press: 0.010
+    roll: 0.0
+    pitch: 0.0
+    yaw: 0.0
+    label: "top_center"
+  2:
+    x: 0.240
+    y: -0.040
+    z_above: 0.110
+    z_press: 0.010
+    roll: 0.0
+    pitch: 0.0
+    yaw: 0.0
+    label: "top_right"
+  3:
+    x: 0.190
+    y: 0.040
+    z_above: 0.110
+    z_press: 0.010
+    roll: 0.0
+    pitch: 0.0
+    yaw: 0.0
+    label: "middle_left"
+  4:
+    x: 0.190
+    y: 0.000
+    z_above: 0.110
+    z_press: 0.010
+    roll: 0.0
+    pitch: 0.0
+    yaw: 0.0
+    label: "center"
+  5:
+    x: 0.190
+    y: -0.040
+    z_above: 0.110
+    z_press: 0.010
+    roll: 0.0
+    pitch: 0.0
+    yaw: 0.0
+    label: "middle_right"
+  6:
+    x: 0.150
+    y: 0.040
+    z_above: 0.110
+    z_press: 0.010
+    roll: 0.0
+    pitch: 0.0
+    yaw: 0.0
+    label: "bottom_left"
+  7:
+    x: 0.150
+    y: 0.000
+    z_above: 0.110
+    z_press: 0.010
+    roll: 0.0
+    pitch: 0.0
+    yaw: 0.0
+    label: "bottom_center"
+  8:
+    x: 0.150
+    y: -0.040
+    z_above: 0.110
+    z_press: 0.010
+    roll: 0.0
+    pitch: 0.0
+    yaw: 0.0
+    label: "bottom_right"

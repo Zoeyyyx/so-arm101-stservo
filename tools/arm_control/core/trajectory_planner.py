@@ -9,9 +9,48 @@ from core.servo_interface import target_raw_from_angles
 from core.types import ACTIVE_JOINTS, ALL_JOINTS, PASSIVE_JOINTS, MotionProfile, PlanResult, Pose6D, TrajectoryPoint
 
 
+PHASE_PROFILE_ALIASES = {
+    "move_to_reload": "approach_above_target",
+    "move_to_hit_above": "approach_above_target",
+    "move_to_target_above": "approach_above_target",
+    "reload_hit_down": "strike_down",
+    "reload_hold": "hit_hold",
+    "reload_hit_up": "return_strike_down",
+    "hit_down": "strike_down",
+    "hit_up": "return_strike_down",
+    "target_hit_down": "strike_down",
+    "target_hit_up": "return_strike_down",
+    "return_to_ready": "return_approach_above_target",
+    "return_to_reload": "return_approach_above_target",
+}
+
+PHASE_IK_ALIASES = {
+    "move_to_reload": "approach_above_target",
+    "move_to_hit_above": "approach_above_target",
+    "move_to_target_above": "approach_above_target",
+    "reload_hit_down": "strike_down",
+    "hit_down": "strike_down",
+    "target_hit_down": "strike_down",
+}
+
+
+def phase_profile_name(hit_config, phase_name):
+    phases = hit_config["hit_action"]["phases"]
+    alias = PHASE_PROFILE_ALIASES.get(phase_name)
+    if alias in phases:
+        return alias
+    if phase_name in phases:
+        return phase_name
+    return phase_name
+
+
+def phase_ik_name(phase_name):
+    return PHASE_IK_ALIASES.get(phase_name, phase_name)
+
+
 def phase_profile(hit_config, phase_name) -> MotionProfile:
     """读取一个阶段的运动参数。"""
-    profile = hit_config["hit_action"]["phases"][phase_name]
+    profile = hit_config["hit_action"]["phases"][phase_profile_name(hit_config, phase_name)]
     action = hit_config.get("hit_action", {})
     dt = float(profile["dt"])
     if int(profile["speed"]) <= int(action.get("low_speed_dt_threshold", 120)):
@@ -28,10 +67,13 @@ def phase_position_error_limit_mm(hit_config, controller_config, phase_name):
     """按阶段读取允许 IK 位置误差，单位 mm。"""
     action = hit_config.get("hit_action", {})
     default_limit = float(controller_config["workspace"].get("position_error_max_mm", 10.0))
-    if phase_name == "approach_above_target":
+    profile_name = phase_profile_name(hit_config, phase_name)
+    if profile_name == "approach_above_target":
         return float(action.get("approach_error_max_mm", default_limit))
-    if phase_name == "strike_down":
+    if profile_name == "strike_down":
         return float(action.get("strike_error_max_mm", default_limit))
+    if profile_name in {"move_to_reload", "reload_press_down", "reload_lift_up"}:
+        return float(action.get("reload_error_max_mm", action.get("approach_error_max_mm", default_limit)))
     return default_limit
 
 
@@ -396,6 +438,67 @@ class HitTrajectoryPlanner:
 
         return {"above_target": pose_at(above_target_z), "contact": pose_at(contact_z)}
 
+    def build_reload_target_pose(self, target_pose_base):
+        """构造 reload 目标接触点。
+
+        reload 现在复用 hit 的 above/contact 生成逻辑：这里仅提供目标平面坐标，
+        build_hit_poses() 会生成 reload_above 和 reload_contact。
+        """
+        reload_config = self.hit_config["hit_action"].get("reload_pose", {})
+        if not reload_config or not bool(reload_config.get("enabled", False)):
+            return None
+
+        if reload_config.get("z_m") is None:
+            action = self.hit_config["hit_action"]
+            configured_height = float(
+                action.get("strike_height_m", action.get("above_target_height_m", action.get("hover_height_m", 0.08)))
+            )
+            min_height = float(action.get("min_strike_height_m", 0.06))
+            z_value = float(target_pose_base.z) + max(configured_height, min_height)
+        else:
+            z_value = float(reload_config["z_m"])
+
+        orientation_source = str(reload_config.get("orientation_source", "hit")).lower()
+        if orientation_source == "hit":
+            roll = float(target_pose_base.roll)
+            pitch = float(target_pose_base.pitch)
+            yaw = float(target_pose_base.yaw)
+        else:
+            roll = float(reload_config.get("roll", target_pose_base.roll))
+            pitch = float(reload_config.get("pitch", target_pose_base.pitch))
+            yaw = float(reload_config.get("yaw", target_pose_base.yaw))
+
+        return Pose6D(
+            x=float(reload_config.get("x_m", 0.249)),
+            y=float(reload_config.get("y_m", 0.085)),
+            z=z_value,
+            roll=roll,
+            pitch=pitch,
+            yaw=yaw,
+            frame=str(reload_config.get("frame", target_pose_base.frame)),
+        )
+
+    def build_reload_contact_pose(self, reload_above_pose):
+        action = self.hit_config["hit_action"]
+        reload_config = action.get("reload_pose", {})
+        depth_value = reload_config.get("reload_hit_depth_m", reload_config.get("press_depth_m"))
+        if depth_value is None:
+            depth_value = action.get(
+                "reload_hit_depth_m",
+                action.get("strike_height_m", action.get("above_target_height_m", action.get("hover_height_m", 0.08))),
+            )
+        min_depth = float(reload_config.get("min_press_depth_m", action.get("min_strike_height_m", 0.06)))
+        reload_hit_depth = max(float(depth_value), min_depth)
+        return Pose6D(
+            x=float(reload_above_pose.x),
+            y=float(reload_above_pose.y),
+            z=float(reload_above_pose.z) - reload_hit_depth,
+            roll=float(reload_above_pose.roll),
+            pitch=float(reload_above_pose.pitch),
+            yaw=float(reload_above_pose.yaw),
+            frame=reload_above_pose.frame,
+        )
+
     def make_point(self, phase_name, pose, angles, debug, profile):
         """生成轨迹点。"""
         return TrajectoryPoint(
@@ -433,11 +536,14 @@ class HitTrajectoryPlanner:
         profile = phase_profile(self.hit_config, phase_name)
         steps = adaptive_steps(int(profile.steps), start_angles, target_angles, self.hit_config)
         min_raw_step = int(self.hit_config["hit_action"].get("min_joint_raw_step", 4))
+        allow_outside_safe = phase_name in set(
+            self.hit_config["hit_action"].get("allow_outside_safe_phases", [])
+        )
         current_seed = dict(start_angles)
         previous_raw = target_raw_from_angles(start_angles, self.controller_config)
         path = interpolate_joint_angles_smooth(start_angles, target_angles, steps)
         for point_index, angles in enumerate(path, start=1):
-            joint_violations = self.safety_checker.validate_target_angles(angles)
+            joint_violations = [] if allow_outside_safe else self.safety_checker.validate_target_angles(angles)
             if joint_violations:
                 detail = "\n".join(
                     f"  {joint}: target={value:.3f} deg, safe={low:.3f}..{high:.3f} deg"
@@ -463,6 +569,8 @@ class HitTrajectoryPlanner:
         default_max_iter = int(self.controller_config["ik"].get("max_iter", 200))
         min_raw_step = int(self.hit_config["hit_action"].get("min_joint_raw_step", 4))
         previous_raw = target_raw_from_angles(seed_angles, self.controller_config)
+        solver_phase_name = phase_ik_name(phase_name)
+        force_position_only = solver_phase_name in {"approach_above_target"}
         for point_index, pose in enumerate(poses, start=1):
             last_success = trajectory[-1].angles if len(trajectory) > phase_start else current_seed
             attempts = [
@@ -479,9 +587,9 @@ class HitTrajectoryPlanner:
                         attempt_seed,
                         self.hit_config,
                         gripper_target,
-                        phase_name,
+                        solver_phase_name,
                         max_iter=attempt_iter,
-                        force_position_only=(phase_name == "approach_above_target"),
+                        force_position_only=force_position_only,
                     )
                 except Exception as exc:  # noqa: BLE001 - 返回 PlanResult 给上层处理。
                     errors.append({"attempt": attempt_name, "error": str(exc)})
@@ -605,15 +713,16 @@ class HitTrajectoryPlanner:
             "note": "",
         }
         if next_pose is not None and seed_angles is not None:
+            solver_phase_name = phase_ik_name(phase_name) if phase_name is not None else phase_name
             try:
                 _next_angles, next_debug = self.ik_solver.solve(
                     next_pose,
                     seed_angles,
                     self.hit_config,
                     gripper_target,
-                    phase_name,
+                    solver_phase_name,
                     max_iter=int(self.controller_config["ik"].get("max_iter", 200)) * 3,
-                    force_position_only=(phase_name == "approach_above_target"),
+                    force_position_only=(solver_phase_name in {"approach_above_target"}),
                 )
                 context["next_point_error_mm"] = next_debug.get("position_error_mm")
             except Exception as exc:  # noqa: BLE001 - 这里只做诊断，不影响原始错误。
@@ -639,6 +748,141 @@ class HitTrajectoryPlanner:
             point.dt = float(profile.dt)
         return reversed_points
 
+    def build_press_motion(
+        self,
+        trajectory,
+        target_name,
+        above_pose,
+        contact_pose,
+        seed_angles,
+        gripper_target,
+        approach_phase,
+        press_phase,
+        hold_phase,
+        lift_phase,
+        contact_dwell_key,
+        use_fk_above_for_press=False,
+    ):
+        """追加一套通用下压动作：above -> contact -> dwell -> above。
+
+        hit 和 reload 都通过这里生成下压轨迹；二者只更换 target_pose_base
+        和输出阶段名，避免 reload 走独立姿态/轨迹逻辑。
+        """
+        action = self.hit_config["hit_action"]
+        approach_start = len(trajectory)
+        solver_phase_name = phase_ik_name(approach_phase)
+        try:
+            above_angles, above_debug = self.ik_solver.solve(
+                above_pose,
+                seed_angles,
+                self.hit_config,
+                gripper_target,
+                solver_phase_name,
+                force_position_only=(solver_phase_name in {"approach_above_target"}),
+            )
+        except Exception as exc:  # noqa: BLE001 - 返回 PlanResult 给 CLI/ROS 处理。
+            return seed_angles, None, f"{target_name} above 单点 IK 求解失败：{exc}"
+
+        reason = self.safety_checker.validate_solution(
+            approach_phase,
+            1,
+            above_pose,
+            above_angles,
+            above_debug,
+            max_position_error_mm=phase_position_error_limit_mm(
+                self.hit_config,
+                self.controller_config,
+                approach_phase,
+            ),
+        )
+        if reason:
+            return seed_angles, None, reason
+
+        approach_profile = phase_profile(self.hit_config, approach_phase)
+        approach_start_pose = self.ik_solver.fk_pose(seed_angles, above_pose)
+        trajectory.append(
+            self.exact_joint_point(
+                approach_phase,
+                approach_start_pose,
+                seed_angles,
+                approach_profile,
+            )
+        )
+        seed, reason = self.append_joint_phase(
+            trajectory,
+            approach_phase,
+            seed_angles,
+            above_angles,
+            above_pose,
+        )
+        if reason:
+            return seed_angles, None, reason
+        approach_points = list(trajectory[approach_start:])
+        seed = dict(approach_points[-1].angles) if approach_points else dict(above_angles)
+
+        press_above_pose = above_pose
+        press_contact_pose = contact_pose
+        if use_fk_above_for_press:
+            press_depth = float(above_pose.z) - float(contact_pose.z)
+            press_above_pose = self.ik_solver.fk_pose(seed, above_pose)
+            press_contact_pose = Pose6D(
+                x=float(press_above_pose.x),
+                y=float(press_above_pose.y),
+                z=float(press_above_pose.z) - press_depth,
+                roll=float(press_above_pose.roll),
+                pitch=float(press_above_pose.pitch),
+                yaw=float(press_above_pose.yaw),
+                frame=press_above_pose.frame,
+            )
+
+        press_start = len(trajectory)
+
+        def press_poses_factory(steps):
+            return interpolate_pose_z(press_above_pose, press_contact_pose, steps)
+
+        seed, reason, phase_adaptive = self.append_adaptive_cartesian_phase(
+            trajectory,
+            press_phase,
+            press_poses_factory,
+            seed,
+            gripper_target,
+        )
+        if reason:
+            return seed_angles, None, reason
+        press_points = list(trajectory[press_start:])
+
+        hold_profile = phase_profile(self.hit_config, hold_phase)
+        hold_profile.dt = float(
+            action.get(
+                contact_dwell_key,
+                action.get("dwell_s", hold_profile.dt),
+            )
+        )
+        hold_point = self.exact_joint_point(hold_phase, press_contact_pose, seed, hold_profile)
+        trajectory.append(hold_point)
+        hold_points = [hold_point]
+
+        lift_points = self.copy_reversed_phase(
+            press_points,
+            lift_phase,
+            profile_name=lift_phase,
+        )
+        trajectory.extend(lift_points)
+        if lift_points:
+            seed = dict(lift_points[-1].angles)
+
+        return seed, {
+            "target_pose": press_contact_pose,
+            "above_pose": press_above_pose,
+            "contact_pose": press_contact_pose,
+            "approach_points": approach_points,
+            "press_points": press_points,
+            "hold_points": hold_points,
+            "lift_points": lift_points,
+            "approach_debug": above_debug,
+            "press_adaptive": phase_adaptive,
+        }, None
+
     def plan_hit(self, target_pose_base, current_angles, gripper_target):
         """规划一次完整打靶动作。"""
         home_angles = self.home_angles(current_angles, gripper_target)
@@ -647,25 +891,52 @@ class HitTrajectoryPlanner:
             home_angles,
             self.home_tolerance_deg(),
         )
-        if differences:
-            return PlanResult(
-                success=False,
-                reason=self.safety_checker.format_home_mismatch(differences),
-                diagnostics={"home_differences": differences},
-            )
 
-        poses = self.build_hit_poses(target_pose_base)
+        poses = {}
         home_pose = self.ik_solver.fk_pose(home_angles, target_pose_base)
         poses["home"] = home_pose
         ready_angles = self.ready_angles(current_angles, gripper_target)
         ready_pose = self.ik_solver.fk_pose(ready_angles, target_pose_base)
         poses["ready"] = ready_pose
+        reload_target_pose = self.build_reload_target_pose(target_pose_base)
 
         trajectory = []
         adaptive_diagnostics = {}
+        auto_return_points = []
+
+        if differences:
+            auto_return_start = len(trajectory)
+            seed, reason = self.append_joint_phase(
+                trajectory,
+                "auto_return_home",
+                current_angles,
+                home_angles,
+                target_pose_base,
+            )
+            if reason:
+                return PlanResult(
+                    False,
+                    "自动回 home 失败：\n" + reason,
+                    trajectory,
+                    poses,
+                    diagnostics={"home_differences": differences},
+                )
+            auto_return_points = list(trajectory[auto_return_start:])
+            adaptive_diagnostics["auto_return_home"] = [
+                {
+                    "mode": "current_to_home_joint_space",
+                    "points": len(auto_return_points),
+                    "home_delta_count": len(differences),
+                }
+            ]
+        else:
+            seed = dict(home_angles)
+
         home_profile = phase_profile(self.hit_config, "return_home")
         home_point = self.exact_joint_point("home", home_pose, home_angles, home_profile)
         trajectory.append(home_point)
+        home_points = [home_point]
+        seed = dict(home_angles)
 
         ready_start = len(trajectory)
         seed, reason = self.append_joint_phase(
@@ -673,73 +944,86 @@ class HitTrajectoryPlanner:
             "move_to_ready",
             home_angles,
             ready_angles,
-            target_pose_base,
+            ready_pose,
         )
         if reason:
             return PlanResult(False, reason, trajectory, poses)
         move_to_ready_points = list(trajectory[ready_start:])
 
-        approach_start = len(trajectory)
-        try:
-            above_angles, above_debug = self.ik_solver.solve(
-                poses["above_target"],
-                seed,
-                self.hit_config,
-                gripper_target,
-                "approach_above_target",
-                force_position_only=True,
-            )
-        except Exception as exc:  # noqa: BLE001 - 返回 PlanResult 供 CLI/ROS 处理。
-            return PlanResult(False, f"approach_above_target 单点 IK 求解失败：{exc}", trajectory, poses)
-        reason = self.safety_checker.validate_solution(
-            "approach_above_target",
-            1,
-            poses["above_target"],
-            above_angles,
-            above_debug,
-            max_position_error_mm=phase_position_error_limit_mm(
-                self.hit_config,
-                self.controller_config,
-                "approach_above_target",
-            ),
-        )
-        if reason:
-            return PlanResult(False, reason, trajectory, poses)
-        seed, reason = self.append_joint_phase(
-            trajectory,
-            "approach_above_target",
-            seed,
-            above_angles,
-            poses["above_target"],
-        )
-        if reason:
-            return PlanResult(False, reason, trajectory, poses)
-        approach_points = list(trajectory[approach_start:])
-        adaptive_diagnostics["approach_above_target"] = [
-            {
-                "mode": "single_ik_then_joint_space",
-                "points": len(approach_points),
-                "ik_error_mm": above_debug.get("position_error_mm"),
-            }
-        ]
-        home_points = [home_point]
-        outbound_points = home_points + move_to_ready_points + approach_points
+        reload_motion = None
+        hit_motion = None
+        reload_points = []
+        reload_press_points = []
+        reload_hold_points = []
+        reload_lift_points = []
+        if reload_target_pose is None:
+            return PlanResult(False, "reload_pose is disabled or missing.", trajectory, poses)
 
-        strike_start = len(trajectory)
-        def strike_poses_factory(steps):
-            return interpolate_pose_z(poses["above_target"], poses["contact"], steps)
-
-        seed, reason, phase_adaptive = self.append_adaptive_cartesian_phase(
+        reload_contact_pose = self.build_reload_contact_pose(reload_target_pose)
+        seed, reload_motion, reason = self.build_press_motion(
             trajectory,
-            "strike_down",
-            strike_poses_factory,
+            "reload",
+            reload_target_pose,
+            reload_contact_pose,
             seed,
             gripper_target,
+            approach_phase="move_to_reload",
+            press_phase="reload_hit_down",
+            hold_phase="reload_hold",
+            lift_phase="reload_hit_up",
+            contact_dwell_key="hit_contact_dwell_s",
         )
-        adaptive_diagnostics["strike_down"] = phase_adaptive
         if reason:
             return PlanResult(False, reason, trajectory, poses)
-        strike_points = list(trajectory[strike_start:])
+        poses["reload"] = reload_motion["above_pose"]
+        poses["reload_target"] = reload_motion["target_pose"]
+        poses["reload_above"] = reload_motion["above_pose"]
+        poses["reload_contact"] = reload_motion["contact_pose"]
+        reload_points = reload_motion["approach_points"]
+        reload_press_points = reload_motion["press_points"]
+        reload_hold_points = reload_motion["hold_points"]
+        reload_lift_points = reload_motion["lift_points"]
+        adaptive_diagnostics["move_to_reload"] = [
+            {
+                "mode": "shared_press_motion_approach",
+                "points": len(reload_points),
+                "ik_error_mm": reload_motion["approach_debug"].get("position_error_mm"),
+            }
+        ]
+        adaptive_diagnostics["reload_hit_down"] = reload_motion["press_adaptive"]
+
+        hit_poses = self.build_hit_poses(target_pose_base)
+        seed, hit_motion, reason = self.build_press_motion(
+            trajectory,
+            "hit",
+            hit_poses["above_target"],
+            hit_poses["contact"],
+            seed,
+            gripper_target,
+            approach_phase="move_to_hit_above",
+            press_phase="hit_down",
+            hold_phase="hit_hold",
+            lift_phase="hit_up",
+            contact_dwell_key="hit_contact_dwell_s",
+        )
+        if reason:
+            return PlanResult(False, reason, trajectory, poses)
+        poses["hit_above"] = hit_motion["above_pose"]
+        poses["hit_contact"] = hit_motion["contact_pose"]
+        poses["above_target"] = hit_motion["above_pose"]
+        poses["contact"] = hit_motion["contact_pose"]
+        approach_points = hit_motion["approach_points"]
+        strike_points = hit_motion["press_points"]
+        hit_hold_points = hit_motion["hold_points"]
+        return_strike_points = hit_motion["lift_points"]
+        adaptive_diagnostics["move_to_hit_above"] = [
+            {
+                "mode": "shared_press_motion_approach",
+                "points": len(approach_points),
+                "ik_error_mm": hit_motion["approach_debug"].get("position_error_mm"),
+            }
+        ]
+        adaptive_diagnostics["hit_down"] = hit_motion["press_adaptive"]
         strike_contract = assert_strike_cartesian_contract(
             strike_points,
             target_pose_base,
@@ -756,44 +1040,53 @@ class HitTrajectoryPlanner:
                 diagnostics={"strike_contract": strike_contract},
             )
 
-        return_strike_points = self.copy_reversed_phase(
-            strike_points,
-            "return_strike_down",
-            profile_name="return_strike_down",
+        return_to_ready_start = len(trajectory)
+        seed, reason = self.append_joint_phase(
+            trajectory,
+            "return_to_ready",
+            seed,
+            ready_angles,
+            ready_pose,
         )
-        return_approach_points = self.copy_reversed_phase(
-            approach_points,
-            "return_approach_above_target",
-            profile_name="return_approach_above_target",
-        )
-        return_ready_points = self.copy_reversed_phase(
-            move_to_ready_points,
-            "return_move_to_ready",
+        if reason:
+            return PlanResult(False, reason, trajectory, poses)
+        return_to_ready_points = list(trajectory[return_to_ready_start:])
+
+        return_home_points = self.copy_reversed_phase(
+            home_points + move_to_ready_points,
+            "return_home",
             profile_name="return_move_to_ready",
         )
-        return_home_points = self.copy_reversed_phase(
-            home_points,
-            "return_home",
-            profile_name="return_home",
+        reverse_check = {
+            "ok": True,
+            "reason": "",
+            "reload_hit_down_vs_reload_hit_up": compare_reversed_points(
+                reload_press_points,
+                reload_lift_points,
+            ),
+            "hit_down_vs_hit_up": compare_reversed_points(strike_points, return_strike_points),
+            "home_ready_vs_return_home": compare_reversed_points(
+                home_points + move_to_ready_points,
+                return_home_points,
+            ),
+        }
+        reverse_check["reload_press_down_vs_lift_up"] = reverse_check["reload_hit_down_vs_reload_hit_up"]
+        reverse_check["strike_down_vs_return_strike_down"] = reverse_check["hit_down_vs_hit_up"]
+        reverse_check["ok"] = all(
+            bool(item.get("ok", False))
+            for key, item in reverse_check.items()
+            if isinstance(item, dict) and key not in {"reason"}
         )
-        return_points = return_approach_points + return_ready_points + return_home_points
-        reverse_check = verify_strict_reverse_return(
-            outbound_points,
-            strike_points,
-            return_strike_points,
-            return_points,
-        )
+        if not reverse_check["ok"]:
+            reverse_check["reason"] = "至少一个回程阶段不是对应去程阶段的严格反序。"
         if not reverse_check["ok"]:
             return PlanResult(
                 False,
-                reverse_check["reason"],
+                reverse_check.get("reason", "回程轨迹反向校验失败。"),
                 trajectory,
                 poses,
                 diagnostics={"reverse_check": reverse_check},
             )
-        trajectory.extend(return_strike_points)
-        trajectory.extend(return_approach_points)
-        trajectory.extend(return_ready_points)
         trajectory.extend(return_home_points)
 
         return PlanResult(
@@ -802,21 +1095,37 @@ class HitTrajectoryPlanner:
             poses=poses,
             diagnostics={
                 "return_policy": (
-                    "回程按阶段栈反向："
-                    "return_strike_down = strike_down 反向；"
-                    "return_approach_above_target = approach_above_target 反向；"
-                    "return_move_to_ready = move_to_ready 反向；"
-                    "return_home = home 反向。"
+                    "路线：必要时 auto_return_home -> home -> ready -> reload_above -> reload_contact "
+                    "-> reload_above -> hit_above -> hit_contact -> hit_above -> ready -> home。"
+                    "reload 和 hit 下压都调用同一套 press motion 构建逻辑，只替换目标坐标。"
                 ),
-                "strict_reverse_return": True,
-                "outbound_points": len(outbound_points),
+                "strict_reverse_return": False,
+                "route": "auto-home-ready-reload-press-hit-press-ready-home",
+                "auto_return_home_used": bool(auto_return_points),
+                "home_differences": differences,
+                "auto_return_home_points": len(auto_return_points),
                 "move_to_ready_points": len(move_to_ready_points),
+                "move_to_reload_points": len(reload_points),
+                "reload_hit_down_points": len(reload_press_points),
+                "reload_hit_up_points": len(reload_lift_points),
+                "reload_press_down_points": len(reload_press_points),
+                "reload_hold_points": len(reload_hold_points),
+                "reload_lift_up_points": len(reload_lift_points),
+                "return_reload_to_ready_points": 0,
+                "move_to_hit_above_points": len(approach_points),
+                "hit_down_points": len(strike_points),
+                "hit_up_points": len(return_strike_points),
+                "move_to_target_above_points": len(approach_points),
+                "target_hit_down_points": len(strike_points),
+                "target_hit_up_points": len(return_strike_points),
                 "approach_points": len(approach_points),
                 "home_points": len(home_points),
                 "strike_points": len(strike_points),
+                "hit_hold_points": len(hit_hold_points),
                 "return_strike_down_points": len(return_strike_points),
-                "return_approach_above_target_points": len(return_approach_points),
-                "return_move_to_ready_points": len(return_ready_points),
+                "return_to_ready_points": len(return_to_ready_points),
+                "return_to_reload_points": 0,
+                "return_approach_above_target_points": len(return_to_ready_points),
                 "return_home_points": len(return_home_points),
                 "reverse_check": reverse_check,
                 "strike_contract": strike_contract,

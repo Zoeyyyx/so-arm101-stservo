@@ -8,3 +8,6 @@ __pycache__/
 .idea/
 *.tmp
 *.bak
+.env
+.pytest_cache/
+pytest-cache-files-*/

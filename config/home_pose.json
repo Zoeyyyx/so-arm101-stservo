@@ -2,12 +2,12 @@
   "enabled": true,
   "start_tolerance_deg": 8.0,
   "joint_angles_deg": {
-    "shoulder_pan": 2.013,
-    "shoulder_lift": -89.196,
-    "elbow_flex": 87.872,
-    "wrist_flex": 48.903,
-    "wrist_roll": -77.328,
-    "gripper": 1.431
+    "shoulder_pan": -2.917,
+    "shoulder_lift": -71.672,
+    "elbow_flex": 85.764,
+    "wrist_flex": -82.333,
+    "wrist_roll": -68.982,
+    "gripper": -1.635
   },
   "note": "SO101 打靶程序使用的收起/home 位姿，单位度。hit_target_action.py 只检查当前是否接近该姿态；return_home.py 负责从当前姿态低速回到该姿态。"
 }

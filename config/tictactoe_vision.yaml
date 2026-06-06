@@ -1,0 +1,19 @@
+# 井字棋视觉配置
+# board_corners 顺序：左上、右上、右下、左下。
+camera_index: 0
+warp_size: 600
+board_corners:
+  - [228.0, 384.0]
+  - [249.0, 273.0]
+  - [391.0, 277.0]
+  - [404.0, 390.0]
+human_hsv_lower: [0, 90, 80]
+human_hsv_upper: [10, 255, 255]
+robot_hsv_lower: [0, 0, 0]
+robot_hsv_upper: [179, 255, 120]
+human_hsv_ranges: [[[0, 90, 80], [10, 255, 255]], [[170, 90, 80], [179, 255, 255]]]
+robot_hsv_ranges: [[[0, 0, 0], [179, 255, 120]]]
+min_blob_area: 2500
+ambiguous_ratio: 1.25
+cell_inner_margin_ratio: 0.25
+stable_frame_count: 5

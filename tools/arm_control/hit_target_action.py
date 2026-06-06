@@ -96,8 +96,10 @@ def apply_runtime_overrides(controller, args):
         hit_config["hit_action"]["pre_strike_dwell_s"] = args.pre_strike_dwell
     if args.hit_hold is not None:
         hit_config["hit_action"]["hit_hold_s"] = args.hit_hold
+        hit_config["hit_action"]["hit_contact_dwell_s"] = args.hit_hold
     if args.dwell is not None:
         hit_config["hit_action"]["hit_hold_s"] = args.dwell
+        hit_config["hit_action"]["hit_contact_dwell_s"] = args.dwell
     if args.max_joint_step is not None:
         hit_config["hit_action"]["max_joint_step_deg"] = args.max_joint_step
     if args.approach_error_max_mm is not None:
@@ -159,6 +161,47 @@ def print_trajectory_summary(result, controller=None):
             "total": len(deltas),
         }
 
+    def phase_boundary_report(phase_names):
+        if not controller:
+            return []
+        command_joints = controller.hit_config["hit_action"].get("command_joints", ALL_JOINTS)
+        focus_joint = controller.hit_config["hit_action"].get("diagnostic_focus_joint", "shoulder_lift")
+        warn_deg = float(controller.hit_config["hit_action"].get("phase_boundary_warn_deg", 8.0))
+        warn_raw = int(controller.hit_config["hit_action"].get("phase_boundary_warn_raw", 120))
+        reports = []
+        for previous_phase, next_phase in zip(phase_names, phase_names[1:]):
+            previous_points = [point for point in result.trajectory if point.phase == previous_phase]
+            next_points = [point for point in result.trajectory if point.phase == next_phase]
+            if not previous_points or not next_points:
+                continue
+            previous = previous_points[-1]
+            current = next_points[0]
+            joint_deltas = {
+                joint: abs(float(current.angles[joint]) - float(previous.angles[joint]))
+                for joint in command_joints
+            }
+            raw_deltas = {
+                joint: abs(int(current.raw[joint]) - int(previous.raw[joint]))
+                for joint in command_joints
+            }
+            max_joint_delta = max(joint_deltas.values()) if joint_deltas else 0.0
+            max_raw_delta = max(raw_deltas.values()) if raw_deltas else 0
+            reports.append(
+                {
+                    "previous_phase": previous_phase,
+                    "next_phase": next_phase,
+                    "max_joint_delta_deg": max_joint_delta,
+                    "max_raw_delta": max_raw_delta,
+                    "focus_joint": focus_joint,
+                    "focus_joint_delta_deg": joint_deltas.get(focus_joint, 0.0),
+                    "focus_raw_delta": raw_deltas.get(focus_joint, 0),
+                    "warning": max_joint_delta > warn_deg or max_raw_delta > warn_raw,
+                    "warn_deg": warn_deg,
+                    "warn_raw": warn_raw,
+                }
+            )
+        return reports
+
     return_policy = result.diagnostics.get("return_policy")
     if return_policy:
         print("回程策略:")
@@ -166,19 +209,33 @@ def print_trajectory_summary(result, controller=None):
         if result.diagnostics.get("strict_reverse_return"):
             print(
                 "  已启用严格反向："
+                f"auto_return_home 点数={result.diagnostics.get('auto_return_home_points')}，"
+                f"return_reload_to_ready 点数={result.diagnostics.get('return_reload_to_ready_points')}，"
+                f"reload_lift_up 点数={result.diagnostics.get('reload_lift_up_points')}，"
                 f"return_strike_down 点数={result.diagnostics.get('return_strike_down_points')}，"
                 f"return_approach_above_target 点数={result.diagnostics.get('return_approach_above_target_points')}，"
-                f"return_move_to_ready 点数={result.diagnostics.get('return_move_to_ready_points')}，"
                 f"return_home 点数={result.diagnostics.get('return_home_points')}。"
             )
+        if result.diagnostics.get("auto_return_home_used"):
+            print("  检测到当前姿态不在 home 附近，已自动插入 auto_return_home 阶段。")
+            for item in result.diagnostics.get("home_differences", []):
+                print(
+                    f"    {item['joint']}: current={item['current']:.3f} deg, "
+                    f"home={item['home']:.3f} deg, delta={item['delta']:+.3f} deg"
+                )
     reverse_check = result.diagnostics.get("reverse_check")
     if reverse_check:
         print("严格反向数据校验:")
         for title, key in [
+            ("reload 往返阶段", "reload_to_ready"),
+            ("reload 下压 vs reload 抬起", "reload_press_down_vs_lift_up"),
             ("下击阶段 vs 下击反向阶段", "strike_down_vs_return_strike_down"),
-            ("home+前伸阶段 vs 前伸反向+home 反向阶段", "home_approach_vs_return_stack"),
+            ("ready 到 hit 上方 vs hit 上方回 ready", "approach_above_target_vs_return"),
+            ("home 到 ready vs ready 回 home", "home_ready_vs_return_home"),
         ]:
-            item = reverse_check[key]
+            item = reverse_check.get(key)
+            if not item:
+                continue
             print(
                 f"  {title}: ok={item['ok']} "
                 f"forward_points={item['forward_points']} reverse_points={item['reverse_points']} "
@@ -211,6 +268,16 @@ def print_trajectory_summary(result, controller=None):
                     f"  {phase}: mode=single_ik_then_joint_space "
                     f"points={last['points']} ik_error={float(last['ik_error_mm']):.3f} mm"
                 )
+            elif "steps" not in last:
+                details = " ".join(
+                    f"{key}={value}"
+                    for key, value in last.items()
+                    if key != "mode"
+                )
+                print(
+                    f"  {phase}: mode={last.get('mode', 'unknown')} "
+                    f"{details}"
+                )
             else:
                 print(
                     f"  {phase}: final_steps={last['steps']} "
@@ -222,11 +289,29 @@ def print_trajectory_summary(result, controller=None):
     for name, pose in result.poses.items():
         print(f"  {name:14s}: x={pose.x:.4f} y={pose.y:.4f} z={pose.z:.4f} frame={pose.frame}")
 
-    print("轨迹概要:")
     phase_names = []
     for point in result.trajectory:
         if point.phase not in phase_names:
             phase_names.append(point.phase)
+
+    if controller is not None:
+        print("阶段首尾连续性:")
+        for item in phase_boundary_report(phase_names):
+            status = "WARNING" if item["warning"] else "ok"
+            print(
+                f"  {status:7s} {item['previous_phase']} -> {item['next_phase']} "
+                f"max_joint_delta={item['max_joint_delta_deg']:.3f}deg "
+                f"max_raw_delta={item['max_raw_delta']} "
+                f"{item['focus_joint']}_delta={item['focus_joint_delta_deg']:.3f}deg/"
+                f"{item['focus_raw_delta']}raw"
+            )
+            if item["warning"]:
+                print(
+                    f"          threshold: joint>{item['warn_deg']:.3f}deg "
+                    f"or raw>{item['warn_raw']}"
+                )
+
+    print("轨迹概要:")
     for phase in phase_names:
         points = [point for point in result.trajectory if point.phase == phase]
         if not points:
@@ -348,15 +433,21 @@ def main():
         print_trajectory_summary(result, controller)
         print(
             "动作停留时间: "
+            f"reload接触停留={float(controller.hit_config['hit_action'].get('reload_contact_dwell_s', controller.hit_config['hit_action'].get('reload_pose', {}).get('dwell_s', 0.0))):.2f}s "
             f"above停留={float(controller.hit_config['hit_action'].get('pre_strike_dwell_s', 0.0)):.2f}s "
-            f"击中停留={float(controller.hit_config['hit_action'].get('hit_hold_s', 0.0)):.2f}s "
+            f"hit接触停留={float(controller.hit_config['hit_action'].get('hit_contact_dwell_s', controller.hit_config['hit_action'].get('hit_hold_s', 0.0))):.2f}s "
             f"回升停留={float(controller.hit_config['hit_action'].get('after_rise_dwell_s', 0.0)):.2f}s"
+        )
+        print(
+            "工具向下阶段: "
+            f"{controller.hit_config.get('tool_orientation', {}).get('tool_down_phases', [])}"
         )
         print(
             "执行模式: "
             f"sync_write={controller.hit_config['hit_action'].get('sync_write', False)} "
             f"strict_servo_wait={controller.hit_config['hit_action'].get('strict_servo_wait', False)} "
             f"debug_visible_strike={controller.hit_config['hit_action'].get('debug_visible_strike', False)} "
+            f"wait_at_phase_end={controller.hit_config['hit_action'].get('wait_at_phase_end', False)} "
             f"wait_raw_tolerance={controller.hit_config['hit_action'].get('wait_raw_tolerance', 25)} "
             f"wait_timeout_s={controller.hit_config['hit_action'].get('wait_timeout_s', 0.8)} "
             f"wait_timeout_policy={controller.hit_config['hit_action'].get('wait_timeout_policy', 'warn')} "
@@ -364,6 +455,10 @@ def main():
             f"command_raw_deadband={controller.hit_config['hit_action'].get('command_raw_deadband', 0)} "
             f"send_full_active_joint_frame={controller.hit_config['hit_action'].get('send_full_active_joint_frame', True)} "
             f"skip_unchanged_points={controller.hit_config['hit_action'].get('skip_unchanged_points', False)}"
+        )
+        print(
+            "关键等待阶段: "
+            f"{controller.hit_config['hit_action'].get('phase_end_wait_phases', [])}"
         )
 
         if not args.yes:
