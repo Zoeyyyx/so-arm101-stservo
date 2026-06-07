@@ -1,11 +1,11 @@
-"""调试井字棋棋盘视觉识别。
+"""Debug tic-tac-toe board vision recognition.
 
-常用方式：
+Common usage:
 
     python scripts/debug_board_vision.py --image board.jpg
     python scripts/debug_board_vision.py --camera-index 0
 
-先运行 calibrate_board_vision.py 标定四角，再运行本脚本看 9 格识别结果。
+Run calibrate_board_vision.py first, then use this script to inspect 3x3 recognition.
 """
 
 from __future__ import annotations
@@ -35,17 +35,17 @@ WINDOW_NAME = "tictactoe vision debug"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="调试井字棋棋盘视觉识别")
-    parser.add_argument("--config", default="config/tictactoe_vision.yaml", help="视觉配置文件路径")
-    parser.add_argument("--image", help="使用图片调试，而不是打开摄像头")
-    parser.add_argument("--camera-index", type=int, help="覆盖配置里的 camera_index")
-    parser.add_argument("--save-debug", help="保存带九宫格识别结果的调试图片")
-    parser.add_argument("--once", action="store_true", help="摄像头模式只识别一帧后退出")
+    parser = argparse.ArgumentParser(description="Debug tic-tac-toe board vision recognition.")
+    parser.add_argument("--config", default="config/tictactoe_vision.yaml", help="Vision config path.")
+    parser.add_argument("--image", help="Use an image instead of opening the camera.")
+    parser.add_argument("--camera-index", type=int, help="Override camera_index from the config.")
+    parser.add_argument("--save-debug", help="Save the debug image with 3x3 recognition overlay.")
+    parser.add_argument("--once", action="store_true", help="Camera mode: process one frame and exit.")
     return parser.parse_args()
 
 
 def window_is_closed(cv2, window_name: str) -> bool:
-    """判断 OpenCV 窗口是否已经被用户关闭。"""
+    """Return True if the OpenCV window has been closed."""
 
     try:
         return cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1
@@ -54,13 +54,13 @@ def window_is_closed(cv2, window_name: str) -> bool:
 
 
 def print_result(board, stable_board=None, cells=None) -> None:
-    print("当前识别棋盘:")
+    print("Current board:")
     print(format_vision_board(board))
     if stable_board is not None:
-        print("稳定棋盘:")
+        print("Stable board:")
         print(format_vision_board(stable_board))
     if cells is not None:
-        print("每格像素统计: H=红色像素, R=黑色像素")
+        print("Per-cell pixel stats: H=red pixels, R=black pixels")
         for cell in cells:
             print(
                 f"  cell {cell.index}: state={cell.state} "
@@ -73,7 +73,7 @@ def run_image_mode(args: argparse.Namespace) -> None:
     config = load_vision_config(args.config)
     image = cv2.imread(str(Path(args.image)))
     if image is None:
-        raise SystemExit(f"无法读取图片: {args.image}")
+        raise SystemExit(f"Could not read image: {args.image}")
 
     warped = warp_board(image, config)
     result = analyze_warped_board(warped, config)
@@ -82,11 +82,11 @@ def run_image_mode(args: argparse.Namespace) -> None:
     debug = draw_debug_overlay(warped, result, config)
     if args.save_debug:
         cv2.imwrite(args.save_debug, debug)
-        print(f"已保存调试图片: {args.save_debug}")
+        print(f"Saved debug image: {args.save_debug}")
         return
 
     cv2.imshow(WINDOW_NAME, debug)
-    print("按任意键或关闭窗口退出。")
+    print("Press any key or close the window to exit.")
     while not window_is_closed(cv2, WINDOW_NAME):
         if cv2.waitKey(20) != -1:
             break
@@ -101,15 +101,15 @@ def run_camera_mode(args: argparse.Namespace) -> None:
 
     cap = cv2.VideoCapture(config.camera_index)
     if not cap.isOpened():
-        raise SystemExit(f"无法打开摄像头: {config.camera_index}")
+        raise SystemExit(f"Could not open camera: {config.camera_index}")
 
     stable = BoardStabilityFilter(config.stable_frame_count)
-    print("按 q 或关闭窗口退出；按空格打印当前棋盘。")
+    print("Press q or close the window to exit; press Space to print the current board.")
     try:
         while True:
             ok, frame = cap.read()
             if not ok:
-                raise SystemExit("摄像头读取失败")
+                raise SystemExit("Camera read failed.")
 
             result = recognize_frame(frame, config)
             stable_board = stable.update(result.board)
@@ -128,7 +128,7 @@ def run_camera_mode(args: argparse.Namespace) -> None:
                 if args.once:
                     break
     except KeyboardInterrupt:
-        print("收到 Ctrl+C，退出视觉调试。")
+        print("Ctrl+C received. Exiting vision debug.")
     finally:
         cap.release()
         cv2.destroyAllWindows()

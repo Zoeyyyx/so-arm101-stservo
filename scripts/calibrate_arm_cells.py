@@ -1,6 +1,6 @@
-"""标定井字棋 9 个格子的机械臂打点坐标。
+"""Calibrate arm target coordinates for the 9 tic-tac-toe cells.
 
-默认只预览，不写入文件；确认无误后加 --yes 保存。
+Default mode previews changes only. Add --yes to save.
 """
 
 from __future__ import annotations
@@ -29,54 +29,54 @@ DEFAULT_CONFIG = PROJECT_ROOT / "config" / "tictactoe_arm.yaml"
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="标定井字棋格子的机械臂 base 坐标")
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="井字棋机械臂配置路径")
-    parser.add_argument("--output", help="输出配置路径，默认覆盖 --config")
-    parser.add_argument("--print", action="store_true", help="只打印当前标定情况")
+    parser = argparse.ArgumentParser(description="Calibrate arm base coordinates for tic-tac-toe cells.")
+    parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="Tic-tac-toe arm config path.")
+    parser.add_argument("--output", help="Output config path. Defaults to --config.")
+    parser.add_argument("--print", action="store_true", help="Print current calibration only.")
 
-    parser.add_argument("--cell", type=int, help="要设置的格子编号 0..8")
-    parser.add_argument("--x", type=float, help="格子击打点 x，单位米")
-    parser.add_argument("--y", type=float, help="格子击打点 y，单位米")
-    parser.add_argument("--z-press", type=float, help="击打接触点 z，单位米")
-    parser.add_argument("--z-above", type=float, help="下击前上方点 z，单位米")
+    parser.add_argument("--cell", type=int, help="Cell index to set, 0..8.")
+    parser.add_argument("--x", type=float, help="Cell press target x, meters.")
+    parser.add_argument("--y", type=float, help="Cell press target y, meters.")
+    parser.add_argument("--z-press", type=float, help="Press/contact z, meters.")
+    parser.add_argument("--z-above", type=float, help="Above/approach z, meters.")
     parser.add_argument("--roll", type=float, default=0.0)
     parser.add_argument("--pitch", type=float, default=0.0)
     parser.add_argument("--yaw", type=float, default=0.0)
     parser.add_argument("--label", default="")
 
-    parser.add_argument("--generate-grid", action="store_true", help="用左上角和行列向量一次生成 9 格")
-    parser.add_argument("--origin-x", type=float, help="cell 0 中心 x")
-    parser.add_argument("--origin-y", type=float, help="cell 0 中心 y")
-    parser.add_argument("--col-dx", type=float, help="从左到右一格的 x 变化")
-    parser.add_argument("--col-dy", type=float, help="从左到右一格的 y 变化")
-    parser.add_argument("--row-dx", type=float, help="从上到下一格的 x 变化")
-    parser.add_argument("--row-dy", type=float, help="从上到下一格的 y 变化")
+    parser.add_argument("--generate-grid", action="store_true", help="Generate all 9 cells from origin and row/column vectors.")
+    parser.add_argument("--origin-x", type=float, help="Cell 0 center x.")
+    parser.add_argument("--origin-y", type=float, help="Cell 0 center y.")
+    parser.add_argument("--col-dx", type=float, help="X change when moving one cell left-to-right.")
+    parser.add_argument("--col-dy", type=float, help="Y change when moving one cell left-to-right.")
+    parser.add_argument("--row-dx", type=float, help="X change when moving one cell top-to-bottom.")
+    parser.add_argument("--row-dy", type=float, help="Y change when moving one cell top-to-bottom.")
 
-    parser.add_argument("--from-current", action="store_true", help="连接机械臂，读取当前末端 FK 坐标")
+    parser.add_argument("--from-current", action="store_true", help="Connect the arm and read the current end-effector FK position.")
     parser.add_argument(
         "--current-as",
         choices=["press", "above"],
         default="press",
-        help="把当前末端位置保存为 z_press 还是 z_above",
+        help="Save the current end-effector z as z_press or z_above.",
     )
-    parser.add_argument("--port", help="覆盖配置里的 COM 口，例如 COM5")
-    parser.add_argument("--baudrate", type=int, help="覆盖配置里的波特率")
-    parser.add_argument("--yes", action="store_true", help="确认写入配置文件")
+    parser.add_argument("--port", help="Override the configured COM port, e.g. COM5.")
+    parser.add_argument("--baudrate", type=int, help="Override the configured baudrate.")
+    parser.add_argument("--yes", action="store_true", help="Confirm writing the config file.")
     return parser
 
 
 def print_config(config: TictactoeArmConfig) -> None:
-    print("井字棋机械臂落点配置:")
+    print("Tic-tac-toe arm target config:")
     print(f"  port={config.port} baudrate={config.baudrate} frame={config.frame}")
     print(f"  hit_config={config.hit_config}")
     print(f"  home_config={config.home_config}")
     print(f"  ready_config={config.ready_config}")
     print(f"  default_strike_height={config.default_strike_height:.4f} m")
-    print("格子标定情况:")
+    print("Cell calibration:")
     for index in range(9):
         cell = config.cells[index]
         mark = "OK" if cell.is_configured() else "MISSING"
-        missing = "" if cell.is_configured() else f" 缺少={','.join(cell.missing_fields())}"
+        missing = "" if cell.is_configured() else f" missing={','.join(cell.missing_fields())}"
         print(
             f"  cell {index}: {mark:7s} "
             f"x={format_value(cell.x)} y={format_value(cell.y)} "
@@ -93,7 +93,7 @@ def format_value(value: float | None) -> str:
 def require_args(args: argparse.Namespace, names: list[str]) -> None:
     missing = [name for name in names if getattr(args, name.replace("-", "_")) is None]
     if missing:
-        raise SystemExit(f"缺少参数: {', '.join('--' + name for name in missing)}")
+        raise SystemExit(f"Missing arguments: {', '.join('--' + name for name in missing)}")
 
 
 def apply_manual_cell(config: TictactoeArmConfig, args: argparse.Namespace) -> None:
@@ -142,7 +142,7 @@ def apply_current_pose(config: TictactoeArmConfig, args: argparse.Namespace) -> 
 
     player = ArmCellPlayer(config, repo_root=PROJECT_ROOT)
     player_module_root = player.repo_root
-    from tictactoe.arm_player import add_arm_control_paths  # 延迟导入路径修正工具
+    from tictactoe.arm_player import add_arm_control_paths  # Deferred path setup.
 
     add_arm_control_paths(player_module_root)
     from core.arm_controller import ArmController  # type: ignore
@@ -185,8 +185,8 @@ def apply_current_pose(config: TictactoeArmConfig, args: argparse.Namespace) -> 
         )
     )
     print(
-        f"已读取当前末端 FK: cell={index} x={pose.x:.4f} y={pose.y:.4f} z={pose.z:.4f} "
-        f"保存为 {args.current_as}"
+        f"Read current end-effector FK: cell={index} x={pose.x:.4f} y={pose.y:.4f} z={pose.z:.4f} "
+        f"saved_as={args.current_as}"
     )
 
 
@@ -212,11 +212,11 @@ def main() -> None:
 
     output = args.output or args.config
     if not args.yes:
-        print("当前只是预览，未写入配置。确认无误后追加 --yes 保存。")
+        print("Preview only. No config was written. Add --yes to save.")
         return
 
     save_arm_config(config, output)
-    print(f"已保存井字棋机械臂落点配置: {output}")
+    print(f"Saved tic-tac-toe arm target config: {output}")
 
 
 if __name__ == "__main__":

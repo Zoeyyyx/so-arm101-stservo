@@ -61,6 +61,16 @@ def test_human_win_finishes_game():
     assert result.winner == "X"
 
 
+def test_forced_draw_finishes_game_early():
+    manager = TicTacToeGameManager()
+    result = manager.process_board("XXOOXX.OO")
+
+    assert result.success is True
+    assert result.status == "forced_draw"
+    assert result.probabilities.draw == 1.0
+    assert result.robot_cell is None
+
+
 def test_robot_decision_without_arm_player():
     manager = TicTacToeGameManager()
     result = manager.process_board("X........")
@@ -115,6 +125,8 @@ def test_result_summary_contains_expected_board():
     text = "\n".join(result_summary_lines(result))
 
     assert "当前棋盘" in text
+    assert "当前胜负概率" in text
+    assert "落子后胜负概率" in text
     assert "机械臂决策: cell=4" in text
     assert "机械臂落子后的预期棋盘" in text
 

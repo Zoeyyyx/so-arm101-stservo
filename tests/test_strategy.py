@@ -11,8 +11,10 @@ from tictactoe.strategy import (
     check_winner,
     format_board,
     is_draw,
+    is_forced_draw_by_no_potential,
     legal_moves,
     normalize_board,
+    outcome_probabilities,
     validate_human_move,
 )
 
@@ -74,6 +76,27 @@ def test_draw_detection():
     assert is_draw(board) is True
     assert best_move(board).index is None
     assert best_move(board).reason == "draw"
+
+
+def test_outcome_probabilities_sum_to_one():
+    probabilities = outcome_probabilities("X........")
+
+    total = probabilities.human_win + probabilities.robot_win + probabilities.draw
+    assert total == pytest.approx(1.0)
+    assert probabilities.policy == "both_players_uniform_random"
+
+
+def test_forced_draw_detects_no_remaining_three_in_a_row():
+    assert is_forced_draw_by_no_potential("XXOOXX.OO") is True
+
+    probabilities = outcome_probabilities("XXOOXX.OO")
+    assert probabilities.draw == pytest.approx(1.0)
+    assert probabilities.human_win == pytest.approx(0.0)
+    assert probabilities.robot_win == pytest.approx(0.0)
+
+
+def test_not_forced_draw_when_a_player_can_still_make_three():
+    assert is_forced_draw_by_no_potential("X........") is False
 
 
 def test_invalid_board_piece_count():

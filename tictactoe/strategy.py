@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Iterable, Sequence
 
 
@@ -51,6 +52,23 @@ class MoveDecision:
     index: int | None
     reason: str
     score: int
+
+
+@dataclass(frozen=True)
+class OutcomeProbabilities:
+    """从当前棋盘继续对局的胜负概率。"""
+
+    human_win: float
+    robot_win: float
+    draw: float
+    policy: str = "both_players_uniform_random"
+
+    def as_percentages(self) -> dict[str, float]:
+        return {
+            HUMAN: self.human_win * 100.0,
+            ROBOT: self.robot_win * 100.0,
+            EMPTY: self.draw * 100.0,
+        }
 
 
 def normalize_cell(cell: object) -> str:
@@ -204,6 +222,96 @@ def best_move(board: Sequence[object] | str, robot: str = ROBOT, human: str = HU
         return MoveDecision(index=None, reason="no_legal_move", score=0)
 
     return MoveDecision(index=best_index, reason=classify_reason(normalized, best_index, robot_mark, human_mark), score=best_score)
+
+
+def outcome_probabilities(board: Sequence[object] | str) -> OutcomeProbabilities:
+    """预测后续胜/负/平概率。
+
+    预测口径用于现场演示：从当前局面开始，轮到哪一方，哪一方就在所有合法
+    空格中均匀随机落子。也就是说，机械臂和人类后续都有可能随机选择剩余格子。
+    """
+
+    normalized = normalize_board(board)
+    human_win, robot_win, draw = _outcome_probabilities_cached(normalized)
+    return OutcomeProbabilities(human_win=human_win, robot_win=robot_win, draw=draw)
+
+
+@lru_cache(maxsize=None)
+def _outcome_probabilities_cached(board: tuple[str, ...]) -> tuple[float, float, float]:
+    winner = check_winner(board)
+    if winner == HUMAN:
+        return 1.0, 0.0, 0.0
+    if winner == ROBOT:
+        return 0.0, 1.0, 0.0
+    if EMPTY not in board:
+        return 0.0, 0.0, 1.0
+
+    x_count = board.count(HUMAN)
+    o_count = board.count(ROBOT)
+    if x_count == o_count:
+        player = HUMAN
+    elif x_count == o_count + 1:
+        player = ROBOT
+    else:
+        return 0.0, 0.0, 1.0
+
+    moves = ordered_moves(board)
+    if not moves:
+        return 0.0, 0.0, 1.0
+    totals = [0.0, 0.0, 0.0]
+    weight = 1.0 / len(moves)
+    for index in moves:
+        child = apply_move(board, index, player)
+        outcome = _outcome_probabilities_cached(child)
+        totals[0] += outcome[0] * weight
+        totals[1] += outcome[1] * weight
+        totals[2] += outcome[2] * weight
+    return tuple(totals)  # type: ignore[return-value]
+
+
+def is_forced_draw_by_no_potential(board: Sequence[object] | str) -> bool:
+    """判断是否已经结构性必平。
+
+    条件：棋盘未满、无人获胜，且 X/O 双方在剩余可落子次数内，都无法在任何
+    一条三连线上补齐自己的棋子。
+    """
+
+    normalized = normalize_board(board)
+    if check_winner(normalized) is not None or is_draw(normalized):
+        return False
+    return not can_player_still_make_three(normalized, HUMAN) and not can_player_still_make_three(normalized, ROBOT)
+
+
+def can_player_still_make_three(board: Sequence[object] | str, player: str) -> bool:
+    """判断某方是否仍有机会利用剩余空格形成三连。"""
+
+    normalized = tuple(normalize_cell(cell) for cell in board)
+    mark = normalize_cell(player)
+    if mark not in {HUMAN, ROBOT}:
+        raise BoardError("player 必须是 X 或 O")
+    remaining = remaining_moves_by_player(normalized)[mark]
+    opponent = ROBOT if mark == HUMAN else HUMAN
+    for line in WIN_LINES:
+        cells = [normalized[index] for index in line]
+        if opponent in cells:
+            continue
+        needed = cells.count(EMPTY)
+        if needed <= remaining:
+            return True
+    return False
+
+
+def remaining_moves_by_player(board: Sequence[str]) -> dict[str, int]:
+    """按人类先手规则估算双方剩余最多还能落几子。"""
+
+    empty_count = tuple(board).count(EMPTY)
+    x_count = tuple(board).count(HUMAN)
+    o_count = tuple(board).count(ROBOT)
+    if x_count == o_count:
+        return {HUMAN: (empty_count + 1) // 2, ROBOT: empty_count // 2}
+    if x_count == o_count + 1:
+        return {HUMAN: empty_count // 2, ROBOT: (empty_count + 1) // 2}
+    return {HUMAN: 0, ROBOT: 0}
 
 
 def ordered_moves(board: Sequence[str]) -> list[int]:

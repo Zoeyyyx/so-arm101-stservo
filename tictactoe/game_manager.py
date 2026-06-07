@@ -20,12 +20,15 @@ from .strategy import (
     ROBOT,
     BoardError,
     MoveDecision,
+    OutcomeProbabilities,
     apply_move,
     best_move,
     check_winner,
     is_draw,
+    is_forced_draw_by_no_potential,
     normalize_board,
     normalize_cell,
+    outcome_probabilities,
 )
 from .vision import UNKNOWN, format_vision_board
 
@@ -40,6 +43,8 @@ class GameTurnResult:
     reason: str = ""
     winner: str | None = None
     decision: MoveDecision | None = None
+    probabilities: OutcomeProbabilities | None = None
+    after_probabilities: OutcomeProbabilities | None = None
     robot_cell: int | None = None
     after_board: tuple[str, ...] | None = None
     command: list[str] = field(default_factory=list)
@@ -98,23 +103,60 @@ class TicTacToeGameManager:
         except BoardError as exc:
             return GameTurnResult(False, "invalid_board", observed, reason=str(exc))
 
+        probabilities = outcome_probabilities(normalized)
         winner = check_winner(normalized)
         if winner is not None:
             status = "human_won" if winner == HUMAN else "robot_won"
-            return GameTurnResult(True, status, normalized, winner=winner, reason=f"{winner} 已经获胜。")
+            return GameTurnResult(
+                True,
+                status,
+                normalized,
+                winner=winner,
+                probabilities=probabilities,
+                reason=f"{winner} 已经获胜。",
+            )
 
         if is_draw(normalized):
-            return GameTurnResult(True, "draw", normalized, reason="棋盘已满，平局。")
+            return GameTurnResult(
+                True,
+                "draw",
+                normalized,
+                probabilities=probabilities,
+                reason="棋盘已满，平局。",
+            )
+
+        if is_forced_draw_by_no_potential(normalized):
+            return GameTurnResult(
+                True,
+                "forced_draw",
+                normalized,
+                probabilities=probabilities,
+                reason="双方在剩余空格中都无法形成连续三个棋子，提前判定平局。",
+            )
 
         turn_status = robot_turn_status(normalized)
         if turn_status != "robot_turn":
-            return GameTurnResult(True, turn_status, normalized, reason=turn_status_reason(turn_status))
+            return GameTurnResult(
+                True,
+                turn_status,
+                normalized,
+                probabilities=probabilities,
+                reason=turn_status_reason(turn_status),
+            )
 
         decision = best_move(normalized)
         if decision.index is None:
-            return GameTurnResult(True, "no_robot_move", normalized, decision=decision, reason=decision.reason)
+            return GameTurnResult(
+                True,
+                "no_robot_move",
+                normalized,
+                decision=decision,
+                probabilities=probabilities,
+                reason=decision.reason,
+            )
 
         after_board = apply_move(normalized, decision.index, ROBOT)
+        after_probabilities = outcome_probabilities(after_board)
         command: list[str] = []
         arm_plan = None
         planned = False
@@ -131,6 +173,8 @@ class TicTacToeGameManager:
                         normalized,
                         reason=str(exc),
                         decision=decision,
+                        probabilities=probabilities,
+                        after_probabilities=after_probabilities,
                         robot_cell=decision.index,
                         after_board=after_board,
                     )
@@ -140,6 +184,8 @@ class TicTacToeGameManager:
                     normalized,
                     reason=str(exc),
                     decision=decision,
+                    probabilities=probabilities,
+                    after_probabilities=after_probabilities,
                     robot_cell=decision.index,
                     after_board=after_board,
                 )
@@ -158,6 +204,8 @@ class TicTacToeGameManager:
                         normalized,
                         reason=str(exc),
                         decision=decision,
+                        probabilities=probabilities,
+                        after_probabilities=after_probabilities,
                         robot_cell=decision.index,
                         after_board=after_board,
                         command=command,
@@ -170,6 +218,8 @@ class TicTacToeGameManager:
                         normalized,
                         reason=getattr(arm_plan, "reason", "机械臂规划失败"),
                         decision=decision,
+                        probabilities=probabilities,
+                        after_probabilities=after_probabilities,
                         robot_cell=decision.index,
                         after_board=after_board,
                         command=command,
@@ -184,6 +234,8 @@ class TicTacToeGameManager:
             normalized,
             reason=decision.reason,
             decision=decision,
+            probabilities=probabilities,
+            after_probabilities=after_probabilities,
             robot_cell=decision.index,
             after_board=after_board,
             command=command,
@@ -245,6 +297,8 @@ def result_summary_lines(result: GameTurnResult) -> list[str]:
     ]
     if result.winner:
         lines.append(f"胜者: {result.winner}")
+    if result.probabilities:
+        lines.append(format_probability_line("当前胜负概率", result.probabilities))
     if result.decision:
         lines.append(
             f"机械臂决策: cell={result.decision.index} "
@@ -252,6 +306,8 @@ def result_summary_lines(result: GameTurnResult) -> list[str]:
         )
     if result.after_board is not None:
         lines.extend(["机械臂落子后的预期棋盘:", result.after_board_text or ""])
+    if result.after_probabilities:
+        lines.append(format_probability_line("落子后胜负概率", result.after_probabilities))
     if result.command:
         lines.append("等价机械臂命令:")
         lines.append(" ".join(result.command))
@@ -262,3 +318,11 @@ def result_summary_lines(result: GameTurnResult) -> list[str]:
     if result.reason:
         lines.append(f"说明: {result.reason}")
     return lines
+
+
+def format_probability_line(label: str, probabilities: OutcomeProbabilities) -> str:
+    return (
+        f"{label}: 人类X胜={probabilities.human_win * 100.0:.1f}% "
+        f"机械臂O胜={probabilities.robot_win * 100.0:.1f}% "
+        f"平局={probabilities.draw * 100.0:.1f}%"
+    )

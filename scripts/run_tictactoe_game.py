@@ -28,7 +28,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from tictactoe.arm_player import ArmCellPlayer, load_arm_config  # noqa: E402
 from tictactoe.game_manager import TicTacToeGameManager, result_summary_lines  # noqa: E402
-from tictactoe.strategy import check_winner, is_draw  # noqa: E402
+from tictactoe.settlement_actions import SettlementActionPlayer  # noqa: E402
+from tictactoe.strategy import HUMAN, ROBOT, check_winner, is_draw, is_forced_draw_by_no_potential  # noqa: E402
 from tictactoe.vision import (  # noqa: E402
     UNKNOWN,
     BoardStabilityFilter,
@@ -43,6 +44,7 @@ from tictactoe.vision import (  # noqa: E402
 
 DEFAULT_ARM_CONFIG = PROJECT_ROOT / "config" / "tictactoe_arm.yaml"
 DEFAULT_VISION_CONFIG = PROJECT_ROOT / "config" / "tictactoe_vision.yaml"
+DEFAULT_SETTLEMENT_CONFIG = PROJECT_ROOT / "config" / "tictactoe_settlement.json"
 WINDOW_NAME = "tictactoe live game"
 
 
@@ -64,6 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", help="覆盖机械臂 COM 口，例如 COM5")
     parser.add_argument("--plan", action="store_true", help="连接机械臂并做 dry-run 规划")
     parser.add_argument("--execute", action="store_true", help="真实执行机械臂落子动作")
+    parser.add_argument("--settlement-config", default=str(DEFAULT_SETTLEMENT_CONFIG), help="对局结算动作配置")
+    parser.add_argument("--no-settlement", action="store_true", help="禁用胜负结算机械臂动作")
     return parser
 
 
@@ -140,7 +144,48 @@ def is_game_over(board: tuple[str, ...]) -> bool:
     return check_winner(board) is not None or is_draw(board)
 
 
-def run_live_camera(args: argparse.Namespace, manager: TicTacToeGameManager) -> None:
+def settlement_outcome_from_result(result) -> str | None:
+    """返回 robot_win / human_win / draw，None 表示对局继续。"""
+
+    if result.status == "robot_won":
+        return "robot_win"
+    if result.status == "human_won":
+        return "human_win"
+    if result.status in {"draw", "forced_draw"}:
+        return "draw"
+
+    if result.after_board is None:
+        return None
+    winner = check_winner(result.after_board)
+    if winner == ROBOT:
+        return "robot_win"
+    if winner == HUMAN:
+        return "human_win"
+    if is_draw(result.after_board):
+        return "draw"
+    if is_forced_draw_by_no_potential(result.after_board):
+        return "draw"
+    return None
+
+
+def run_settlement_if_needed(args: argparse.Namespace, arm_config, result) -> bool:
+    outcome = settlement_outcome_from_result(result)
+    if outcome is None:
+        return False
+    print(f"对局结算: outcome={outcome}")
+    if args.no_settlement:
+        print("结算动作已禁用。")
+        return True
+    player = SettlementActionPlayer(
+        arm_config,
+        settlement_config_path=args.settlement_config,
+        repo_root=PROJECT_ROOT,
+    )
+    player.play(outcome, execute=args.execute, port=args.port)
+    return True
+
+
+def run_live_camera(args: argparse.Namespace, manager: TicTacToeGameManager, arm_config) -> None:
     cv2, _ = require_cv2()
     config = load_vision_config(args.vision_config)
     if args.camera_index is not None:
@@ -207,6 +252,11 @@ def run_live_camera(args: argparse.Namespace, manager: TicTacToeGameManager) -> 
             print(format_vision_board(stable_board))
             print_result(result)
 
+            settlement_done = run_settlement_if_needed(args, arm_config, result)
+            if settlement_done:
+                print("对局已结束。")
+                break
+
             if result.status in {"robot_move_ready", "robot_move_needs_arm_calibration"} and result.robot_cell is not None:
                 print(f"请把黑棋放到 cell {result.robot_cell}。")
                 print("放好后继续下红棋，程序会等待下一次稳定变化。")
@@ -239,12 +289,13 @@ def main() -> None:
     manager = TicTacToeGameManager(player)
 
     if args.camera_live:
-        run_live_camera(args, manager)
+        run_live_camera(args, manager, arm_config)
         return
 
     board = read_board(args)
     result = manager.process_board(board, plan=args.plan or args.execute, execute=args.execute, port=args.port)
     print_result(result)
+    run_settlement_if_needed(args, arm_config, result)
 
     if not result.success:
         raise SystemExit(1)

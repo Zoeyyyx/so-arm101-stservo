@@ -1,0 +1,52 @@
+{
+  "default_speed": 160,
+  "default_acc": 12,
+  "actions": {
+    "victory": {
+      "duration_s": 5.0,
+      "home_before_s": 1.0,
+      "home_after_s": 1.0,
+      "initial_roll_s": 0.0,
+      "speed": 650,
+      "acc": 35,
+      "home_speed": 220,
+      "home_acc": 16,
+      "home_steps": 12,
+      "gripper_open_deg": 35.0,
+      "gripper_close_deg": 2.0,
+      "wrist_roll_initial_delta_deg": 0.0,
+      "wrist_roll_center_delta_deg": 0.0,
+      "wrist_roll_swing_deg": 30.0,
+      "pulses": 6,
+      "note": "机械臂胜利：开始前回 home；随后比耶动作本体持续 5s，不计算回位时间；gripper 在 2~35 度开合，wrist_roll 以 home 姿态为中心往复摆动；pulses 表示半周期目标点，6 约等于 3 个完整周期；结束后回 home。"
+    },
+    "draw_handshake": {
+      "duration_s": 5.0,
+      "home_before_s": 1.0,
+      "home_after_s": 1.0,
+      "speed": 650,
+      "acc": 35,
+      "home_speed": 220,
+      "home_acc": 16,
+      "home_steps": 12,
+      "center_move_s": 0.4,
+      "wrist_flex_center_delta_deg": 90.0,
+      "wrist_flex_delta_deg": 35.0,
+      "swings": 10,
+      "note": "平局：开始前回 home；快速到 home+90 度中心位；随后围绕中心反复摆动 5s，不计算到中心和回位时间；swings 表示半周期目标点，10 约等于 5 个完整周期；结束后回 home。"
+    },
+    "defeat_nod": {
+      "duration_s": 5.0,
+      "home_before_s": 0.6,
+      "home_after_s": 0.6,
+      "speed": 650,
+      "acc": 35,
+      "home_speed": 360,
+      "home_acc": 24,
+      "home_steps": 10,
+      "wrist_flex_move_s": 0.4,
+      "wrist_flex_delta_deg": 135.0,
+      "note": "机械臂方失败：快速回到 home；快速 wrist_flex 到 home+135 度；保持该位置 5s；快速返回 home。"
+    }
+  }
+}
