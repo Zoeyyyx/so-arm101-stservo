@@ -71,7 +71,20 @@ class ServoInterface:
             raise last_error
         return JointState(angles=angles, raw=raw)
 
-    def send_point(self, point: TrajectoryPoint, joints=None):
+    def joint_motion_profile(self, point: TrajectoryPoint, joint_name: str, action_config: dict | None = None):
+        """返回单个关节实际下发的 speed/acc，支持按阶段和关节覆盖。"""
+        speed = int(point.speed)
+        acc = int(point.acc)
+        overrides = (action_config or {}).get("joint_speed_overrides", {})
+        phase_overrides = overrides.get(point.phase, {})
+        joint_override = phase_overrides.get(joint_name, {})
+        if "speed" in joint_override:
+            speed = int(joint_override["speed"])
+        if "acc" in joint_override:
+            acc = int(joint_override["acc"])
+        return speed, acc
+
+    def send_point(self, point: TrajectoryPoint, joints=None, action_config=None):
         """发送单帧关节目标。
 
         joints 为空时只发送主动关节。打靶阶段 wrist_roll 和 gripper 默认保持当前状态。
@@ -82,10 +95,11 @@ class ServoInterface:
             joint_config = self.controller_config["_joint_by_name"][name]
             scs_id = int(joint_config["id"])
             raw = int(point.raw[name])
-            result, error = self.packet_handler.WritePosEx(scs_id, raw, int(point.speed), int(point.acc))
+            speed, acc = self.joint_motion_profile(point, name, action_config)
+            result, error = self.packet_handler.WritePosEx(scs_id, raw, speed, acc)
             check_comm(self.packet_handler, scs_id, result, error, "WritePosEx")
 
-    def send_point_sync(self, point: TrajectoryPoint, joints=None):
+    def send_point_sync(self, point: TrajectoryPoint, joints=None, action_config=None):
         """用 SyncWrite 同步发送单帧目标，减少多个舵机启动时间差。"""
         if self.packet_handler is None:
             raise RuntimeError("ServoInterface 尚未 connect")
@@ -95,7 +109,8 @@ class ServoInterface:
             joint_config = self.controller_config["_joint_by_name"][name]
             scs_id = int(joint_config["id"])
             raw = int(point.raw[name])
-            if not self.packet_handler.SyncWritePosEx(scs_id, raw, int(point.speed), int(point.acc)):
+            speed, acc = self.joint_motion_profile(point, name, action_config)
+            if not self.packet_handler.SyncWritePosEx(scs_id, raw, speed, acc):
                 raise RuntimeError(f"[ID:{scs_id:03d}] SyncWritePosEx addParam failed")
         result = self.packet_handler.groupSyncWrite.txPacket()
         self.packet_handler.groupSyncWrite.clearParam()
@@ -173,11 +188,13 @@ class ServoInterface:
             action_config.get(
                 "strict_servo_wait_phases",
                 [
-                    "approach_above_target",
-                    "strike_down",
-                    "return_strike_down",
-                    "return_approach_above_target",
-                    "return_move_to_ready",
+                    "hit1_above",
+                    "hit1_down",
+                    "hit1_up",
+                    "hit2_above",
+                    "hit2_down",
+                    "hit2_up",
+                    "return_ready",
                     "return_home",
                 ],
             )
@@ -185,7 +202,7 @@ class ServoInterface:
         debug_wait_phases = set(
             action_config.get(
                 "debug_visible_wait_phases",
-                ["approach_above_target", "strike_down", "return_strike_down"],
+                ["hit1_above", "hit1_down", "hit1_up", "hit2_above", "hit2_down", "hit2_up"],
             )
         )
         command_joints = list(action_config.get("command_joints", ACTIVE_JOINTS))
@@ -205,18 +222,20 @@ class ServoInterface:
                     "home",
                     "move_to_ready",
                     "auto_return_home",
-                    "approach_above_target",
-                    "reload_press_down",
-                    "reload_lift_up",
-                    "strike_down",
-                    "return_strike_down",
+                    "hit1_above",
+                    "hit1_down",
+                    "hit1_up",
+                    "hit2_above",
+                    "hit2_down",
+                    "hit2_up",
+                    "return_ready",
                     "return_home",
                 ],
             )
         )
-        phase_entry_probe_phases = set(action_config.get("phase_entry_probe_phases", ["move_to_reload"]))
+        phase_entry_probe_phases = set(action_config.get("phase_entry_probe_phases", ["hit1_above"]))
         runtime_detail_phases = set(
-            action_config.get("runtime_detail_phases", ["move_to_reload", "move_to_hit_above"])
+            action_config.get("runtime_detail_phases", ["hit1_above", "hit2_above"])
         )
         last_sent_raw = {}
         phase_stats = []
@@ -425,16 +444,16 @@ class ServoInterface:
                 current_stats["sent_points"] += 1
                 frame_joints = command_joints if send_full_frame else send_joints
                 if use_sync_write:
-                    self.send_point_sync(point, joints=frame_joints)
+                    self.send_point_sync(point, joints=frame_joints, action_config=action_config)
                 else:
-                    self.send_point(point, joints=frame_joints)
+                    self.send_point(point, joints=frame_joints, action_config=action_config)
                 for joint in frame_joints:
                     last_sent_raw[joint] = int(point.raw[joint])
             elif not skip_unchanged_points:
                 if use_sync_write:
-                    self.send_point_sync(point, joints=command_joints)
+                    self.send_point_sync(point, joints=command_joints, action_config=action_config)
                 else:
-                    self.send_point(point, joints=command_joints)
+                    self.send_point(point, joints=command_joints, action_config=action_config)
                 for joint in command_joints:
                     last_sent_raw[joint] = int(point.raw[joint])
                 sent_this_point = True

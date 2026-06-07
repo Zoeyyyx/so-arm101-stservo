@@ -10,26 +10,36 @@ from core.types import ACTIVE_JOINTS, ALL_JOINTS, PASSIVE_JOINTS, MotionProfile,
 
 
 PHASE_PROFILE_ALIASES = {
-    "move_to_reload": "approach_above_target",
+    "hit1_above": "approach_above_target",
+    "hit2_above": "approach_above_target",
     "move_to_hit_above": "approach_above_target",
-    "move_to_target_above": "approach_above_target",
-    "reload_hit_down": "strike_down",
-    "reload_hold": "hit_hold",
-    "reload_hit_up": "return_strike_down",
     "hit_down": "strike_down",
+    "hit1_down": "strike_down",
+    "hit2_down": "strike_down",
+    "hit1_hold": "hit_hold",
+    "hit2_hold": "hit_hold",
+    "ready_hold": "hit_hold",
     "hit_up": "return_strike_down",
+    "hit1_up": "return_strike_down",
+    "hit2_up": "return_strike_down",
     "target_hit_down": "strike_down",
     "target_hit_up": "return_strike_down",
+    "return_ready": "return_approach_above_target",
     "return_to_ready": "return_approach_above_target",
-    "return_to_reload": "return_approach_above_target",
 }
 
 PHASE_IK_ALIASES = {
-    "move_to_reload": "approach_above_target",
+    "hit1_above": "approach_above_target",
+    "hit2_above": "approach_above_target",
     "move_to_hit_above": "approach_above_target",
-    "move_to_target_above": "approach_above_target",
-    "reload_hit_down": "strike_down",
     "hit_down": "strike_down",
+    "hit1_down": "strike_down",
+    "hit2_down": "strike_down",
+    "hit1_hold": "hit_hold",
+    "hit2_hold": "hit_hold",
+    "ready_hold": "hit_hold",
+    "hit1_up": "return_strike_down",
+    "hit2_up": "return_strike_down",
     "target_hit_down": "strike_down",
 }
 
@@ -72,8 +82,6 @@ def phase_position_error_limit_mm(hit_config, controller_config, phase_name):
         return float(action.get("approach_error_max_mm", default_limit))
     if profile_name == "strike_down":
         return float(action.get("strike_error_max_mm", default_limit))
-    if profile_name in {"move_to_reload", "reload_press_down", "reload_lift_up"}:
-        return float(action.get("reload_error_max_mm", action.get("approach_error_max_mm", default_limit)))
     return default_limit
 
 
@@ -203,18 +211,27 @@ def pose_xyz(pose):
     return float(pose.x), float(pose.y), float(pose.z)
 
 
-def assert_strike_cartesian_contract(strike_points, target_pose_base, poses, hit_config, controller_config):
-    """校验 strike_down 是否严格符合输入靶心坐标合同。
+def assert_hit_press_contract(
+    press_points,
+    target_pose_base,
+    above_pose,
+    contact_pose,
+    hit_config,
+    controller_config,
+    phase_name,
+):
+    """校验一次 hit down 是否严格符合输入坐标合同。
 
     合同：
-    - above_target = (target_x, target_y, target_z + strike_height)
+    - above = (target_x, target_y, target_z + strike_height)
     - contact = (target_x, target_y, target_z + contact_offset)
-    - strike_down 阶段 x/y 恒定，z 单调下降
-    - 首点是 above_target，末点是 contact
-    - IK achieved_position 误差不超过配置允许值
+    - down 阶段 x/y 恒定，z 单调下降
+    - 首点是 above，末点是 contact
+    - IK achieved_position 误差不超过配置允许值，并记录工具轴姿态误差
     """
     tolerance_m = 1e-9
-    max_position_error = phase_position_error_limit_mm(hit_config, controller_config, "strike_down")
+    max_position_error = phase_position_error_limit_mm(hit_config, controller_config, phase_name)
+    max_orientation_error = float(hit_config.get("tool_orientation", {}).get("max_orientation_error_deg", 35.0))
     action = hit_config["hit_action"]
     strike_height = max(
         float(action.get("strike_height_m", action.get("above_target_height_m", action.get("hover_height_m", 0.08)))),
@@ -234,10 +251,15 @@ def assert_strike_cartesian_contract(strike_points, target_pose_base, poses, hit
     result = {
         "ok": True,
         "reason": "",
-        "strike_points": len(strike_points),
+        "phase": phase_name,
+        "points": len(press_points),
         "expected_above": expected_above,
         "expected_contact": expected_contact,
         "max_position_error_mm": 0.0,
+        "max_orientation_error_deg": 0.0,
+        "orientation_limit_deg": max_orientation_error,
+        "orientation_requested_points": 0,
+        "orientation_fallback_points": 0,
         "max_xy_error_m": 0.0,
         "first_mismatch": None,
     }
@@ -248,13 +270,13 @@ def assert_strike_cartesian_contract(strike_points, target_pose_base, poses, hit
         result["first_mismatch"] = detail
         return result
 
-    if not strike_points:
-        return fail("strike_down 轨迹为空。")
+    if not press_points:
+        return fail(f"{phase_name} 轨迹为空。")
 
-    above_xyz = pose_xyz(poses["above_target"])
-    contact_xyz = pose_xyz(poses["contact"])
+    above_xyz = pose_xyz(above_pose)
+    contact_xyz = pose_xyz(contact_pose)
     for label, actual, expected in [
-        ("above_target", above_xyz, expected_above),
+        ("above", above_xyz, expected_above),
         ("contact", contact_xyz, expected_contact),
     ]:
         errors = [abs(actual[index] - expected[index]) for index in range(3)]
@@ -264,11 +286,11 @@ def assert_strike_cartesian_contract(strike_points, target_pose_base, poses, hit
                 {"label": label, "actual": actual, "expected": expected, "errors": errors},
             )
 
-    first_xyz = pose_xyz(strike_points[0].pose)
-    last_xyz = pose_xyz(strike_points[-1].pose)
+    first_xyz = pose_xyz(press_points[0].pose)
+    last_xyz = pose_xyz(press_points[-1].pose)
     for label, actual, expected in [
-        ("strike_down 首点", first_xyz, expected_above),
-        ("strike_down 末点", last_xyz, expected_contact),
+        (f"{phase_name} 首点", first_xyz, expected_above),
+        (f"{phase_name} 末点", last_xyz, expected_contact),
     ]:
         errors = [abs(actual[index] - expected[index]) for index in range(3)]
         if max(errors) > tolerance_m:
@@ -278,13 +300,13 @@ def assert_strike_cartesian_contract(strike_points, target_pose_base, poses, hit
             )
 
     previous_z = None
-    for index, point in enumerate(strike_points, start=1):
+    for index, point in enumerate(press_points, start=1):
         x_error = abs(float(point.pose.x) - float(target_pose_base.x))
         y_error = abs(float(point.pose.y) - float(target_pose_base.y))
         result["max_xy_error_m"] = max(result["max_xy_error_m"], x_error, y_error)
         if x_error > tolerance_m or y_error > tolerance_m:
             return fail(
-                "strike_down 阶段 x/y 没有恒等于 target_x/target_y。",
+                f"{phase_name} 阶段 x/y 没有恒等于 target_x/target_y。",
                 {
                     "index": index,
                     "pose": pose_xyz(point.pose),
@@ -296,14 +318,23 @@ def assert_strike_cartesian_contract(strike_points, target_pose_base, poses, hit
         current_z = float(point.pose.z)
         if previous_z is not None and current_z > previous_z + tolerance_m:
             return fail(
-                "strike_down 阶段 z 不是单调下降。",
+                f"{phase_name} 阶段 z 不是单调下降。",
                 {"index": index, "previous_z": previous_z, "current_z": current_z},
             )
         previous_z = current_z
         result["max_position_error_mm"] = max(result["max_position_error_mm"], float(point.position_error_mm))
+        if point.orientation_error_deg is not None:
+            result["max_orientation_error_deg"] = max(
+                result["max_orientation_error_deg"],
+                float(point.orientation_error_deg),
+            )
+        if point.orientation_requested:
+            result["orientation_requested_points"] += 1
+        if point.orientation_fallback:
+            result["orientation_fallback_points"] += 1
         if float(point.position_error_mm) > max_position_error:
             return fail(
-                "strike_down IK achieved_position 误差超过允许范围。",
+                f"{phase_name} IK achieved_position 误差超过允许范围。",
                 {
                     "index": index,
                     "target_pose": pose_xyz(point.pose),
@@ -312,6 +343,8 @@ def assert_strike_cartesian_contract(strike_points, target_pose_base, poses, hit
                     "max_position_error_mm": max_position_error,
                 },
             )
+    if result["orientation_requested_points"] <= 0:
+        return fail(f"{phase_name} 没有触发 tool-down 姿态请求。")
     return result
 
 
@@ -438,65 +471,23 @@ class HitTrajectoryPlanner:
 
         return {"above_target": pose_at(above_target_z), "contact": pose_at(contact_z)}
 
-    def build_reload_target_pose(self, target_pose_base):
-        """构造 reload 目标接触点。
+    def build_hit1_target_pose(self, hit2_target_pose):
+        """构造第一击目标点。
 
-        reload 现在复用 hit 的 above/contact 生成逻辑：这里仅提供目标平面坐标，
-        build_hit_poses() 会生成 reload_above 和 reload_contact。
+        hit1 只从配置读取 x/y；z、姿态、frame 全部复用 hit2 target，
+        确保两次 hit 除平面坐标外参数一致。
         """
-        reload_config = self.hit_config["hit_action"].get("reload_pose", {})
-        if not reload_config or not bool(reload_config.get("enabled", False)):
+        hit1_config = self.hit_config["hit_action"].get("hit1_pose", {})
+        if not hit1_config or not bool(hit1_config.get("enabled", True)):
             return None
-
-        if reload_config.get("z_m") is None:
-            action = self.hit_config["hit_action"]
-            configured_height = float(
-                action.get("strike_height_m", action.get("above_target_height_m", action.get("hover_height_m", 0.08)))
-            )
-            min_height = float(action.get("min_strike_height_m", 0.06))
-            z_value = float(target_pose_base.z) + max(configured_height, min_height)
-        else:
-            z_value = float(reload_config["z_m"])
-
-        orientation_source = str(reload_config.get("orientation_source", "hit")).lower()
-        if orientation_source == "hit":
-            roll = float(target_pose_base.roll)
-            pitch = float(target_pose_base.pitch)
-            yaw = float(target_pose_base.yaw)
-        else:
-            roll = float(reload_config.get("roll", target_pose_base.roll))
-            pitch = float(reload_config.get("pitch", target_pose_base.pitch))
-            yaw = float(reload_config.get("yaw", target_pose_base.yaw))
-
         return Pose6D(
-            x=float(reload_config.get("x_m", 0.249)),
-            y=float(reload_config.get("y_m", 0.085)),
-            z=z_value,
-            roll=roll,
-            pitch=pitch,
-            yaw=yaw,
-            frame=str(reload_config.get("frame", target_pose_base.frame)),
-        )
-
-    def build_reload_contact_pose(self, reload_above_pose):
-        action = self.hit_config["hit_action"]
-        reload_config = action.get("reload_pose", {})
-        depth_value = reload_config.get("reload_hit_depth_m", reload_config.get("press_depth_m"))
-        if depth_value is None:
-            depth_value = action.get(
-                "reload_hit_depth_m",
-                action.get("strike_height_m", action.get("above_target_height_m", action.get("hover_height_m", 0.08))),
-            )
-        min_depth = float(reload_config.get("min_press_depth_m", action.get("min_strike_height_m", 0.06)))
-        reload_hit_depth = max(float(depth_value), min_depth)
-        return Pose6D(
-            x=float(reload_above_pose.x),
-            y=float(reload_above_pose.y),
-            z=float(reload_above_pose.z) - reload_hit_depth,
-            roll=float(reload_above_pose.roll),
-            pitch=float(reload_above_pose.pitch),
-            yaw=float(reload_above_pose.yaw),
-            frame=reload_above_pose.frame,
+            x=float(hit1_config.get("x_m", 0.249)),
+            y=float(hit1_config.get("y_m", 0.085)),
+            z=float(hit2_target_pose.z),
+            roll=float(hit2_target_pose.roll),
+            pitch=float(hit2_target_pose.pitch),
+            yaw=float(hit2_target_pose.yaw),
+            frame=hit2_target_pose.frame,
         )
 
     def make_point(self, phase_name, pose, angles, debug, profile):
@@ -748,7 +739,7 @@ class HitTrajectoryPlanner:
             point.dt = float(profile.dt)
         return reversed_points
 
-    def build_press_motion(
+    def build_hit_press(
         self,
         trajectory,
         target_name,
@@ -763,11 +754,7 @@ class HitTrajectoryPlanner:
         contact_dwell_key,
         use_fk_above_for_press=False,
     ):
-        """追加一套通用下压动作：above -> contact -> dwell -> above。
-
-        hit 和 reload 都通过这里生成下压轨迹；二者只更换 target_pose_base
-        和输出阶段名，避免 reload 走独立姿态/轨迹逻辑。
-        """
+        """追加一套 hit 下压动作：above -> down/contact -> hold -> up/above。"""
         action = self.hit_config["hit_action"]
         approach_start = len(trajectory)
         solver_phase_name = phase_ik_name(approach_phase)
@@ -884,7 +871,7 @@ class HitTrajectoryPlanner:
         }, None
 
     def plan_hit(self, target_pose_base, current_angles, gripper_target):
-        """规划一次完整打靶动作。"""
+        """规划双 hit 动作：home -> ready -> hit1 -> hit2 -> ready -> home。"""
         home_angles = self.home_angles(current_angles, gripper_target)
         differences = self.safety_checker.home_differences(
             current_angles,
@@ -898,11 +885,131 @@ class HitTrajectoryPlanner:
         ready_angles = self.ready_angles(current_angles, gripper_target)
         ready_pose = self.ik_solver.fk_pose(ready_angles, target_pose_base)
         poses["ready"] = ready_pose
-        reload_target_pose = self.build_reload_target_pose(target_pose_base)
+        hit1_target_pose = self.build_hit1_target_pose(target_pose_base)
+        if hit1_target_pose is None:
+            return PlanResult(False, "hit1_pose is disabled or missing.", [], poses)
+        hit1_poses = self.build_hit_poses(hit1_target_pose)
+        hit2_poses = self.build_hit_poses(target_pose_base)
+        poses["hit1_above"] = hit1_poses["above_target"]
+        poses["hit1_contact"] = hit1_poses["contact"]
+        poses["hit2_above"] = hit2_poses["above_target"]
+        poses["hit2_contact"] = hit2_poses["contact"]
+        poses["above_target"] = hit2_poses["above_target"]
+        poses["contact"] = hit2_poses["contact"]
 
         trajectory = []
         adaptive_diagnostics = {}
         auto_return_points = []
+
+        def phase_signature(phase_name):
+            profile = phase_profile(self.hit_config, phase_name)
+            return {
+                "phase": phase_name,
+                "profile": phase_profile_name(self.hit_config, phase_name),
+                "ik_phase": phase_ik_name(phase_name),
+                "steps": int(profile.steps),
+                "speed": int(profile.speed),
+                "acc": int(profile.acc),
+                "dt": float(profile.dt),
+                "position_error_limit_mm": phase_position_error_limit_mm(
+                    self.hit_config,
+                    self.controller_config,
+                    phase_name,
+                ),
+            }
+
+        def motion_diagnostics(name, target_pose, motion, seed_before):
+            press_points = motion["press_points"] if motion else []
+            orientation_errors = [
+                float(point.orientation_error_deg)
+                for point in press_points
+                if point.orientation_error_deg is not None
+            ]
+            return {
+                "name": name,
+                "target": pose_xyz(target_pose),
+                "above": pose_xyz(motion["above_pose"]) if motion else None,
+                "contact": pose_xyz(motion["contact_pose"]) if motion else None,
+                "seed_before": dict(seed_before),
+                "approach_ik_error_mm": (
+                    float(motion["approach_debug"].get("position_error_mm", 0.0)) if motion else None
+                ),
+                "approach_orientation_error_deg": (
+                    motion["approach_debug"].get("orientation_error_deg") if motion else None
+                ),
+                "down_points": len(press_points),
+                "down_max_position_error_mm": (
+                    max((float(point.position_error_mm) for point in press_points), default=0.0)
+                ),
+                "down_max_orientation_error_deg": max(orientation_errors, default=None),
+                "down_orientation_requested_points": sum(1 for point in press_points if point.orientation_requested),
+                "down_orientation_fallback_points": sum(1 for point in press_points if point.orientation_fallback),
+            }
+
+        def double_hit_compare(hit1_motion, hit2_motion, hit1_seed, hit2_seed):
+            hit1_info = motion_diagnostics("hit1", hit1_target_pose, hit1_motion, hit1_seed)
+            hit2_info = motion_diagnostics("hit2", target_pose_base, hit2_motion, hit2_seed)
+            seed_deltas = {
+                joint: float(hit2_seed[joint]) - float(hit1_seed[joint])
+                for joint in ALL_JOINTS
+                if joint in hit1_seed and joint in hit2_seed
+            }
+            signatures = {
+                "hit1_above": phase_signature("hit1_above"),
+                "hit2_above": phase_signature("hit2_above"),
+                "hit1_down": phase_signature("hit1_down"),
+                "hit2_down": phase_signature("hit2_down"),
+                "hit1_hold": phase_signature("hit1_hold"),
+                "hit2_hold": phase_signature("hit2_hold"),
+                "hit1_up": phase_signature("hit1_up"),
+                "hit2_up": phase_signature("hit2_up"),
+            }
+            same_profile_ik = all(
+                signatures[left]["profile"] == signatures[right]["profile"]
+                and signatures[left]["ik_phase"] == signatures[right]["ik_phase"]
+                and signatures[left]["steps"] == signatures[right]["steps"]
+                and signatures[left]["speed"] == signatures[right]["speed"]
+                and signatures[left]["acc"] == signatures[right]["acc"]
+                and abs(signatures[left]["dt"] - signatures[right]["dt"]) <= 1e-12
+                and abs(
+                    signatures[left]["position_error_limit_mm"]
+                    - signatures[right]["position_error_limit_mm"]
+                )
+                <= 1e-12
+                for left, right in [
+                    ("hit1_above", "hit2_above"),
+                    ("hit1_down", "hit2_down"),
+                    ("hit1_hold", "hit2_hold"),
+                    ("hit1_up", "hit2_up"),
+                ]
+            )
+            return {
+                "same_build_function": "build_hit_press",
+                "same_profile_and_ik_params": bool(same_profile_ik),
+                "signatures": signatures,
+                "hit1": hit1_info,
+                "hit2": hit2_info,
+                "input_delta": {
+                    "dx": float(target_pose_base.x) - float(hit1_target_pose.x),
+                    "dy": float(target_pose_base.y) - float(hit1_target_pose.y),
+                    "dz": float(target_pose_base.z) - float(hit1_target_pose.z),
+                    "droll": float(target_pose_base.roll) - float(hit1_target_pose.roll),
+                    "dpitch": float(target_pose_base.pitch) - float(hit1_target_pose.pitch),
+                    "dyaw": float(target_pose_base.yaw) - float(hit1_target_pose.yaw),
+                },
+                "seed_delta_hit2_minus_hit1": seed_deltas,
+                "ik_error_delta": {
+                    "approach_mm": (
+                        hit2_info["approach_ik_error_mm"] - hit1_info["approach_ik_error_mm"]
+                        if hit1_info["approach_ik_error_mm"] is not None
+                        and hit2_info["approach_ik_error_mm"] is not None
+                        else None
+                    ),
+                    "down_max_mm": (
+                        hit2_info["down_max_position_error_mm"] - hit1_info["down_max_position_error_mm"]
+                    ),
+                },
+            }
 
         if differences:
             auto_return_start = len(trajectory)
@@ -950,107 +1057,131 @@ class HitTrajectoryPlanner:
             return PlanResult(False, reason, trajectory, poses)
         move_to_ready_points = list(trajectory[ready_start:])
 
-        reload_motion = None
-        hit_motion = None
-        reload_points = []
-        reload_press_points = []
-        reload_hold_points = []
-        reload_lift_points = []
-        if reload_target_pose is None:
-            return PlanResult(False, "reload_pose is disabled or missing.", trajectory, poses)
+        ready_hold_points = []
+        ready_dwell_s = float(self.hit_config["hit_action"].get("ready_dwell_s", 0.0))
+        if ready_dwell_s > 0.0:
+            ready_hold_profile = phase_profile(self.hit_config, "ready_hold")
+            ready_hold_profile.dt = ready_dwell_s
+            ready_hold_point = self.exact_joint_point("ready_hold", ready_pose, seed, ready_hold_profile)
+            trajectory.append(ready_hold_point)
+            ready_hold_points = [ready_hold_point]
 
-        reload_contact_pose = self.build_reload_contact_pose(reload_target_pose)
-        seed, reload_motion, reason = self.build_press_motion(
+        hit1_seed = dict(seed)
+        seed, hit1_motion, reason = self.build_hit_press(
             trajectory,
-            "reload",
-            reload_target_pose,
-            reload_contact_pose,
+            "hit1",
+            hit1_poses["above_target"],
+            hit1_poses["contact"],
             seed,
             gripper_target,
-            approach_phase="move_to_reload",
-            press_phase="reload_hit_down",
-            hold_phase="reload_hold",
-            lift_phase="reload_hit_up",
+            approach_phase="hit1_above",
+            press_phase="hit1_down",
+            hold_phase="hit1_hold",
+            lift_phase="hit1_up",
             contact_dwell_key="hit_contact_dwell_s",
         )
         if reason:
             return PlanResult(False, reason, trajectory, poses)
-        poses["reload"] = reload_motion["above_pose"]
-        poses["reload_target"] = reload_motion["target_pose"]
-        poses["reload_above"] = reload_motion["above_pose"]
-        poses["reload_contact"] = reload_motion["contact_pose"]
-        reload_points = reload_motion["approach_points"]
-        reload_press_points = reload_motion["press_points"]
-        reload_hold_points = reload_motion["hold_points"]
-        reload_lift_points = reload_motion["lift_points"]
-        adaptive_diagnostics["move_to_reload"] = [
+        hit1_approach_points = hit1_motion["approach_points"]
+        hit1_down_points = hit1_motion["press_points"]
+        hit1_hold_points = hit1_motion["hold_points"]
+        hit1_up_points = hit1_motion["lift_points"]
+        adaptive_diagnostics["hit1_above"] = [
             {
                 "mode": "shared_press_motion_approach",
-                "points": len(reload_points),
-                "ik_error_mm": reload_motion["approach_debug"].get("position_error_mm"),
+                "points": len(hit1_approach_points),
+                "ik_error_mm": hit1_motion["approach_debug"].get("position_error_mm"),
             }
         ]
-        adaptive_diagnostics["reload_hit_down"] = reload_motion["press_adaptive"]
+        adaptive_diagnostics["hit1_down"] = hit1_motion["press_adaptive"]
 
-        hit_poses = self.build_hit_poses(target_pose_base)
-        seed, hit_motion, reason = self.build_press_motion(
+        hit2_seed = dict(seed)
+        seed, hit2_motion, reason = self.build_hit_press(
             trajectory,
-            "hit",
-            hit_poses["above_target"],
-            hit_poses["contact"],
+            "hit2",
+            hit2_poses["above_target"],
+            hit2_poses["contact"],
             seed,
             gripper_target,
-            approach_phase="move_to_hit_above",
-            press_phase="hit_down",
-            hold_phase="hit_hold",
-            lift_phase="hit_up",
+            approach_phase="hit2_above",
+            press_phase="hit2_down",
+            hold_phase="hit2_hold",
+            lift_phase="hit2_up",
             contact_dwell_key="hit_contact_dwell_s",
         )
         if reason:
-            return PlanResult(False, reason, trajectory, poses)
-        poses["hit_above"] = hit_motion["above_pose"]
-        poses["hit_contact"] = hit_motion["contact_pose"]
-        poses["above_target"] = hit_motion["above_pose"]
-        poses["contact"] = hit_motion["contact_pose"]
-        approach_points = hit_motion["approach_points"]
-        strike_points = hit_motion["press_points"]
-        hit_hold_points = hit_motion["hold_points"]
-        return_strike_points = hit_motion["lift_points"]
-        adaptive_diagnostics["move_to_hit_above"] = [
-            {
-                "mode": "shared_press_motion_approach",
-                "points": len(approach_points),
-                "ik_error_mm": hit_motion["approach_debug"].get("position_error_mm"),
-            }
-        ]
-        adaptive_diagnostics["hit_down"] = hit_motion["press_adaptive"]
-        strike_contract = assert_strike_cartesian_contract(
-            strike_points,
-            target_pose_base,
-            poses,
-            self.hit_config,
-            self.controller_config,
-        )
-        if not strike_contract["ok"]:
             return PlanResult(
                 False,
-                strike_contract["reason"],
+                "hit2 failed after hit1 succeeded:\n" + reason,
                 trajectory,
                 poses,
-                diagnostics={"strike_contract": strike_contract},
+                diagnostics={
+                    "hit_failure_compare": double_hit_compare(hit1_motion, None, hit1_seed, hit2_seed),
+                    "adaptive_cartesian_steps": adaptive_diagnostics,
+                },
+            )
+        hit2_approach_points = hit2_motion["approach_points"]
+        hit2_down_points = hit2_motion["press_points"]
+        hit2_hold_points = hit2_motion["hold_points"]
+        hit2_up_points = hit2_motion["lift_points"]
+        adaptive_diagnostics["hit2_above"] = [
+            {
+                "mode": "shared_press_motion_approach",
+                "points": len(hit2_approach_points),
+                "ik_error_mm": hit2_motion["approach_debug"].get("position_error_mm"),
+            }
+        ]
+        adaptive_diagnostics["hit2_down"] = hit2_motion["press_adaptive"]
+
+        hit1_contract = assert_hit_press_contract(
+            hit1_down_points,
+            hit1_target_pose,
+            hit1_motion["above_pose"],
+            hit1_motion["contact_pose"],
+            self.hit_config,
+            self.controller_config,
+            "hit1_down",
+        )
+        if not hit1_contract["ok"]:
+            return PlanResult(
+                False,
+                hit1_contract["reason"],
+                trajectory,
+                poses,
+                diagnostics={"hit_contracts": {"hit1": hit1_contract}},
+            )
+        hit2_contract = assert_hit_press_contract(
+            hit2_down_points,
+            target_pose_base,
+            hit2_motion["above_pose"],
+            hit2_motion["contact_pose"],
+            self.hit_config,
+            self.controller_config,
+            "hit2_down",
+        )
+        if not hit2_contract["ok"]:
+            return PlanResult(
+                False,
+                hit2_contract["reason"],
+                trajectory,
+                poses,
+                diagnostics={
+                    "hit_contracts": {"hit1": hit1_contract, "hit2": hit2_contract},
+                    "hit_failure_compare": double_hit_compare(hit1_motion, hit2_motion, hit1_seed, hit2_seed),
+                },
             )
 
         return_to_ready_start = len(trajectory)
         seed, reason = self.append_joint_phase(
             trajectory,
-            "return_to_ready",
+            "return_ready",
             seed,
             ready_angles,
             ready_pose,
         )
         if reason:
             return PlanResult(False, reason, trajectory, poses)
-        return_to_ready_points = list(trajectory[return_to_ready_start:])
+        return_ready_points = list(trajectory[return_to_ready_start:])
 
         return_home_points = self.copy_reversed_phase(
             home_points + move_to_ready_points,
@@ -1060,18 +1191,13 @@ class HitTrajectoryPlanner:
         reverse_check = {
             "ok": True,
             "reason": "",
-            "reload_hit_down_vs_reload_hit_up": compare_reversed_points(
-                reload_press_points,
-                reload_lift_points,
-            ),
-            "hit_down_vs_hit_up": compare_reversed_points(strike_points, return_strike_points),
+            "hit1_down_vs_hit1_up": compare_reversed_points(hit1_down_points, hit1_up_points),
+            "hit2_down_vs_hit2_up": compare_reversed_points(hit2_down_points, hit2_up_points),
             "home_ready_vs_return_home": compare_reversed_points(
                 home_points + move_to_ready_points,
                 return_home_points,
             ),
         }
-        reverse_check["reload_press_down_vs_lift_up"] = reverse_check["reload_hit_down_vs_reload_hit_up"]
-        reverse_check["strike_down_vs_return_strike_down"] = reverse_check["hit_down_vs_hit_up"]
         reverse_check["ok"] = all(
             bool(item.get("ok", False))
             for key, item in reverse_check.items()
@@ -1095,40 +1221,32 @@ class HitTrajectoryPlanner:
             poses=poses,
             diagnostics={
                 "return_policy": (
-                    "路线：必要时 auto_return_home -> home -> ready -> reload_above -> reload_contact "
-                    "-> reload_above -> hit_above -> hit_contact -> hit_above -> ready -> home。"
-                    "reload 和 hit 下压都调用同一套 press motion 构建逻辑，只替换目标坐标。"
+                    "路线：必要时 auto_return_home -> home -> ready -> hit1_above -> hit1_down/contact "
+                    "-> hit1_up -> hit2_above -> hit2_down/contact -> hit2_up -> return_ready -> return_home。"
+                    "hit1 和 hit2 都调用同一个 build_hit_press()，除 x/y 坐标外参数一致。"
                 ),
                 "strict_reverse_return": False,
-                "route": "auto-home-ready-reload-press-hit-press-ready-home",
+                "route": "auto-home-ready-hit1-hit2-ready-home",
                 "auto_return_home_used": bool(auto_return_points),
                 "home_differences": differences,
                 "auto_return_home_points": len(auto_return_points),
                 "move_to_ready_points": len(move_to_ready_points),
-                "move_to_reload_points": len(reload_points),
-                "reload_hit_down_points": len(reload_press_points),
-                "reload_hit_up_points": len(reload_lift_points),
-                "reload_press_down_points": len(reload_press_points),
-                "reload_hold_points": len(reload_hold_points),
-                "reload_lift_up_points": len(reload_lift_points),
-                "return_reload_to_ready_points": 0,
-                "move_to_hit_above_points": len(approach_points),
-                "hit_down_points": len(strike_points),
-                "hit_up_points": len(return_strike_points),
-                "move_to_target_above_points": len(approach_points),
-                "target_hit_down_points": len(strike_points),
-                "target_hit_up_points": len(return_strike_points),
-                "approach_points": len(approach_points),
+                "ready_hold_points": len(ready_hold_points),
+                "ready_dwell_s": ready_dwell_s,
+                "hit1_above_points": len(hit1_approach_points),
+                "hit1_down_points": len(hit1_down_points),
+                "hit1_hold_points": len(hit1_hold_points),
+                "hit1_up_points": len(hit1_up_points),
+                "hit2_above_points": len(hit2_approach_points),
+                "hit2_down_points": len(hit2_down_points),
+                "hit2_hold_points": len(hit2_hold_points),
+                "hit2_up_points": len(hit2_up_points),
                 "home_points": len(home_points),
-                "strike_points": len(strike_points),
-                "hit_hold_points": len(hit_hold_points),
-                "return_strike_down_points": len(return_strike_points),
-                "return_to_ready_points": len(return_to_ready_points),
-                "return_to_reload_points": 0,
-                "return_approach_above_target_points": len(return_to_ready_points),
+                "return_ready_points": len(return_ready_points),
                 "return_home_points": len(return_home_points),
                 "reverse_check": reverse_check,
-                "strike_contract": strike_contract,
+                "hit_contracts": {"hit1": hit1_contract, "hit2": hit2_contract},
+                "double_hit_compare": double_hit_compare(hit1_motion, hit2_motion, hit1_seed, hit2_seed),
                 "adaptive_cartesian_steps": adaptive_diagnostics,
             },
         )

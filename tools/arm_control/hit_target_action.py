@@ -143,6 +143,81 @@ def print_state(state):
         print(f"  {joint:14s} raw={state.raw[joint]:4d} angle={state.angles[joint]:8.3f} deg")
 
 
+def print_double_hit_compare(compare):
+    """打印 hit1/hit2 的输入、IK 和 profile 对比。"""
+    if not compare:
+        return
+    print("双 hit 对比:")
+    print(f"  build_function={compare.get('same_build_function')}")
+    print(f"  same_profile_and_ik_params={compare.get('same_profile_and_ik_params')}")
+    for name in ["hit1", "hit2"]:
+        item = compare.get(name) or {}
+        print(
+            f"  {name}: target={item.get('target')} "
+            f"above={item.get('above')} contact={item.get('contact')}"
+        )
+        print(
+            f"  {'':6s} approach_ik_error={item.get('approach_ik_error_mm')} mm "
+            f"approach_orientation_error={item.get('approach_orientation_error_deg')} deg"
+        )
+        print(
+            f"  {'':6s} down_points={item.get('down_points')} "
+            f"down_max_position_error={item.get('down_max_position_error_mm')} mm "
+            f"down_max_orientation_error={item.get('down_max_orientation_error_deg')} deg "
+            f"tool_down_requested={item.get('down_orientation_requested_points')} "
+            f"fallback={item.get('down_orientation_fallback_points')}"
+        )
+    print(f"  input_delta={compare.get('input_delta')}")
+    seed_delta = compare.get("seed_delta_hit2_minus_hit1") or {}
+    if seed_delta:
+        print("  seed_delta_hit2_minus_hit1:")
+        for joint in ALL_JOINTS:
+            if joint in seed_delta:
+                print(f"    {joint:14s} {float(seed_delta[joint]):+.3f} deg")
+    print(f"  ik_error_delta={compare.get('ik_error_delta')}")
+    signatures = compare.get("signatures") or {}
+    for left, right in [
+        ("hit1_above", "hit2_above"),
+        ("hit1_down", "hit2_down"),
+        ("hit1_hold", "hit2_hold"),
+        ("hit1_up", "hit2_up"),
+    ]:
+        left_sig = signatures.get(left)
+        right_sig = signatures.get(right)
+        if not left_sig or not right_sig:
+            continue
+        print(
+            f"  profile/ik {left} vs {right}: "
+            f"{left_sig['profile']}/{left_sig['ik_phase']} "
+            f"steps={left_sig['steps']} speed={left_sig['speed']} acc={left_sig['acc']} dt={left_sig['dt']} | "
+            f"{right_sig['profile']}/{right_sig['ik_phase']} "
+            f"steps={right_sig['steps']} speed={right_sig['speed']} acc={right_sig['acc']} dt={right_sig['dt']}"
+        )
+
+
+def print_hit_contracts(contracts):
+    """打印 hit1_down / hit2_down 的笛卡尔合同检查。"""
+    if not contracts:
+        return
+    print("hit down 坐标/姿态合同校验:")
+    for name in ["hit1", "hit2"]:
+        item = contracts.get(name)
+        if not item:
+            continue
+        print(
+            f"  {name}: ok={item['ok']} phase={item.get('phase')} points={item.get('points')} "
+            f"max_xy_error={item.get('max_xy_error_m'):.12f} m "
+            f"max_position_error={item.get('max_position_error_mm'):.3f} mm "
+            f"max_orientation_error={item.get('max_orientation_error_deg'):.3f} deg "
+            f"tool_down_requested={item.get('orientation_requested_points')} "
+            f"fallback={item.get('orientation_fallback_points')}"
+        )
+        print(f"  {'':6s} expected_above={item.get('expected_above')}")
+        print(f"  {'':6s} expected_contact={item.get('expected_contact')}")
+        if item.get("first_mismatch"):
+            print(f"  {'':6s} first_mismatch={item['first_mismatch']}")
+
+
 def print_trajectory_summary(result, controller=None):
     """打印规划轨迹摘要。"""
     from core.trajectory_planner import max_adjacent_joint_delta, max_joint_delta_degrees, phase_position_error_limit_mm
@@ -210,10 +285,9 @@ def print_trajectory_summary(result, controller=None):
             print(
                 "  已启用严格反向："
                 f"auto_return_home 点数={result.diagnostics.get('auto_return_home_points')}，"
-                f"return_reload_to_ready 点数={result.diagnostics.get('return_reload_to_ready_points')}，"
-                f"reload_lift_up 点数={result.diagnostics.get('reload_lift_up_points')}，"
-                f"return_strike_down 点数={result.diagnostics.get('return_strike_down_points')}，"
-                f"return_approach_above_target 点数={result.diagnostics.get('return_approach_above_target_points')}，"
+                f"hit1_up 点数={result.diagnostics.get('hit1_up_points')}，"
+                f"hit2_up 点数={result.diagnostics.get('hit2_up_points')}，"
+                f"return_ready 点数={result.diagnostics.get('return_ready_points')}，"
                 f"return_home 点数={result.diagnostics.get('return_home_points')}。"
             )
         if result.diagnostics.get("auto_return_home_used"):
@@ -227,10 +301,8 @@ def print_trajectory_summary(result, controller=None):
     if reverse_check:
         print("严格反向数据校验:")
         for title, key in [
-            ("reload 往返阶段", "reload_to_ready"),
-            ("reload 下压 vs reload 抬起", "reload_press_down_vs_lift_up"),
-            ("下击阶段 vs 下击反向阶段", "strike_down_vs_return_strike_down"),
-            ("ready 到 hit 上方 vs hit 上方回 ready", "approach_above_target_vs_return"),
+            ("hit1 下压 vs hit1 抬起", "hit1_down_vs_hit1_up"),
+            ("hit2 下压 vs hit2 抬起", "hit2_down_vs_hit2_up"),
             ("home 到 ready vs ready 回 home", "home_ready_vs_return_home"),
         ]:
             item = reverse_check.get(key)
@@ -244,18 +316,8 @@ def print_trajectory_summary(result, controller=None):
             )
             if item.get("first_mismatch"):
                 print(f"    first_mismatch={item['first_mismatch']}")
-    strike_contract = result.diagnostics.get("strike_contract")
-    if strike_contract:
-        print("strike_down 坐标合同校验:")
-        print(
-            f"  ok={strike_contract['ok']} points={strike_contract['strike_points']} "
-            f"max_xy_error={strike_contract['max_xy_error_m']:.12f} m "
-            f"max_position_error={strike_contract['max_position_error_mm']:.3f} mm"
-        )
-        print(f"  expected_above={strike_contract['expected_above']}")
-        print(f"  expected_contact={strike_contract['expected_contact']}")
-        if strike_contract.get("first_mismatch"):
-            print(f"  first_mismatch={strike_contract['first_mismatch']}")
+    print_hit_contracts(result.diagnostics.get("hit_contracts"))
+    print_double_hit_compare(result.diagnostics.get("double_hit_compare"))
     adaptive_steps = result.diagnostics.get("adaptive_cartesian_steps")
     if adaptive_steps:
         print("轨迹阶段加密/简化记录:")
@@ -325,10 +387,14 @@ def print_trajectory_summary(result, controller=None):
         error_limit = None
         if controller is not None:
             phase_for_limit = phase
-            if phase == "return_approach_above_target":
+            if phase in {"hit1_above", "hit2_above"}:
                 phase_for_limit = "approach_above_target"
-            elif phase == "return_strike_down":
+            elif phase in {"hit1_down", "hit2_down"}:
                 phase_for_limit = "strike_down"
+            elif phase in {"hit1_up", "hit2_up"}:
+                phase_for_limit = "return_strike_down"
+            elif phase == "return_ready":
+                phase_for_limit = "return_approach_above_target"
             error_limit = phase_position_error_limit_mm(
                 controller.hit_config,
                 controller.controller_config,
@@ -421,9 +487,10 @@ def main():
             if result.diagnostics.get("reverse_check"):
                 print("严格反向数据校验失败详情:")
                 print(result.diagnostics["reverse_check"])
-            if result.diagnostics.get("strike_contract"):
-                print("strike_down 坐标合同失败详情:")
-                print(result.diagnostics["strike_contract"])
+            if result.diagnostics.get("hit_contracts"):
+                print_hit_contracts(result.diagnostics["hit_contracts"])
+            if result.diagnostics.get("hit_failure_compare"):
+                print_double_hit_compare(result.diagnostics["hit_failure_compare"])
             if result.diagnostics.get("home_differences"):
                 print("下一步：先运行 return_home.py 低速回到 home，然后再运行 hit_target_action.py。")
             else:
@@ -433,9 +500,9 @@ def main():
         print_trajectory_summary(result, controller)
         print(
             "动作停留时间: "
-            f"reload接触停留={float(controller.hit_config['hit_action'].get('reload_contact_dwell_s', controller.hit_config['hit_action'].get('reload_pose', {}).get('dwell_s', 0.0))):.2f}s "
+            f"ready停留={float(controller.hit_config['hit_action'].get('ready_dwell_s', 0.0)):.2f}s "
             f"above停留={float(controller.hit_config['hit_action'].get('pre_strike_dwell_s', 0.0)):.2f}s "
-            f"hit接触停留={float(controller.hit_config['hit_action'].get('hit_contact_dwell_s', controller.hit_config['hit_action'].get('hit_hold_s', 0.0))):.2f}s "
+            f"hit1/hit2接触停留={float(controller.hit_config['hit_action'].get('hit_contact_dwell_s', controller.hit_config['hit_action'].get('hit_hold_s', 0.0))):.2f}s "
             f"回升停留={float(controller.hit_config['hit_action'].get('after_rise_dwell_s', 0.0)):.2f}s"
         )
         print(
@@ -456,6 +523,9 @@ def main():
             f"send_full_active_joint_frame={controller.hit_config['hit_action'].get('send_full_active_joint_frame', True)} "
             f"skip_unchanged_points={controller.hit_config['hit_action'].get('skip_unchanged_points', False)}"
         )
+        joint_overrides = controller.hit_config["hit_action"].get("joint_speed_overrides", {})
+        if joint_overrides:
+            print(f"关节速度覆盖: {joint_overrides}")
         print(
             "关键等待阶段: "
             f"{controller.hit_config['hit_action'].get('phase_end_wait_phases', [])}"

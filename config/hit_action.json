@@ -16,12 +16,9 @@
   "tool_orientation": {
     "enforce_tool_down": true,
     "tool_down_phases": [
-      "reload_press_down",
-      "reload_lift_up",
       "strike_down",
-      "reload_hit_down",
-      "reload_hit_up",
-      "hit_down"
+      "hit1_down",
+      "hit2_down"
     ],
     "orientation_mode": "Z",
     "target_axis_in_base": [
@@ -52,27 +49,21 @@
     "note": "收起/home 位姿使用关节角表示，单位度。home 是实测安全停放姿态，默认允许位于 95% 工作安全包络外；打靶轨迹本身仍会检查安全包络。"
   },
   "hit_action": {
-    "strike_height_m": 0.10,
+    "strike_height_m": 0.06,
     "min_strike_height_m": 0.06,
     "contact_offset_m": 0.0,
-    "pre_strike_dwell_s": 0.6,
-    "hit_contact_dwell_s": 1.0,
-    "hit_hold_s": 0.2,
+    "pre_strike_dwell_s": 1.0,
+    "ready_dwell_s": 1.0,
+    "hit_contact_dwell_s": 2.0,
+    "hit_hold_s": 2.0,
     "dwell_s": 0.2,
     "after_rise_dwell_s": 0.2,
-    "reload_pose": {
+    "hit1_pose": {
       "enabled": true,
       "x_m": 0.249,
       "y_m": 0.085,
-      "z_m": 0.110,
-      "z_source": "target",
-      "orientation_source": "hit",
-      "press_depth_m": 0.10,
-      "min_press_depth_m": 0.06,
-      "dwell_s": 1.0,
-      "note": "reload_pose.z_m 是 reload_above 高度；press_depth_m 是竖直下压深度。当前 reload_above.z=0.110m，reload_contact.z=0.010m。reload 复用 hit 的 press motion。"
+      "note": "第一击只配置 x/y；z、strike_height、contact_offset、hold、tool-down、IK 和速度参数全部复用第二击 hit target。"
     },
-    "reload_contact_dwell_s": 1.0,
     "max_joint_step_deg": 7.0,
     "min_joint_raw_step": 4,
     "min_low_speed_dt_s": 0.06,
@@ -80,7 +71,6 @@
     "max_cartesian_phase_steps": 40,
     "approach_error_max_mm": 15.0,
     "strike_error_max_mm": 15.0,
-    "reload_error_max_mm": 15.0,
     "default_gripper": 5.0,
     "sync_write": true,
     "command_joints": [
@@ -90,6 +80,20 @@
       "wrist_flex"
     ],
     "command_raw_deadband": 4,
+    "joint_speed_overrides": {
+      "move_to_ready": {
+        "wrist_flex": {
+          "speed": 360,
+          "acc": 18
+        }
+      },
+      "return_home": {
+        "wrist_flex": {
+          "speed": 360,
+          "acc": 24
+        }
+      }
+    },
     "send_full_active_joint_frame": true,
     "skip_unchanged_points": true,
     "strict_servo_wait": false,
@@ -102,32 +106,32 @@
       "home",
       "move_to_ready",
       "auto_return_home",
-      "move_to_reload",
-      "reload_hit_down",
-      "reload_hit_up",
-      "move_to_hit_above",
-      "hit_down",
-      "hit_up",
-      "return_to_ready",
+      "hit1_above",
+      "hit1_down",
+      "hit1_up",
+      "hit2_above",
+      "hit2_down",
+      "hit2_up",
+      "return_ready",
       "return_home"
     ],
     "debug_visible_wait_phases": [
-      "move_to_reload",
-      "reload_hit_down",
-      "reload_hit_up",
-      "move_to_hit_above",
-      "hit_down",
-      "hit_up"
+      "hit1_above",
+      "hit1_down",
+      "hit1_up",
+      "hit2_above",
+      "hit2_down",
+      "hit2_up"
     ],
     "strict_servo_wait_phases": [
       "move_to_ready",
-      "move_to_reload",
-      "reload_hit_down",
-      "reload_hit_up",
-      "move_to_hit_above",
-      "hit_down",
-      "hit_up",
-      "return_to_ready",
+      "hit1_above",
+      "hit1_down",
+      "hit1_up",
+      "hit2_above",
+      "hit2_down",
+      "hit2_up",
+      "return_ready",
       "return_home",
       "auto_return_home"
     ],
@@ -148,42 +152,12 @@
       "move_to_ready": {
         "steps": 32,
         "dt": 0.05,
-        "speed": 150,
+        "speed": 250,
         "acc": 18
       },
       "auto_return_home": {
         "steps": 32,
         "dt": 0.05,
-        "speed": 180,
-        "acc": 20
-      },
-      "move_to_reload": {
-        "steps": 18,
-        "dt": 0.045,
-        "speed": 180,
-        "acc": 20
-      },
-      "reload_press_down": {
-        "steps": 16,
-        "dt": 0.04,
-        "speed": 220,
-        "acc": 28
-      },
-      "reload_hold": {
-        "steps": 1,
-        "dt": 1.0,
-        "speed": 70,
-        "acc": 8
-      },
-      "reload_lift_up": {
-        "steps": 16,
-        "dt": 0.04,
-        "speed": 200,
-        "acc": 25
-      },
-      "return_reload_to_ready": {
-        "steps": 18,
-        "dt": 0.045,
         "speed": 180,
         "acc": 20
       },
@@ -214,7 +188,7 @@
       "return_move_to_ready": {
         "steps": 28,
         "dt": 0.045,
-        "speed": 200,
+        "speed": 250,
         "acc": 24
       },
       "return_home": {

@@ -1,12 +1,12 @@
 {
   "enabled": true,
   "joint_angles_deg": {
-    "shoulder_pan": -2.917,
-    "shoulder_lift": -66.312,
-    "elbow_flex": 65.3,
-    "wrist_flex": 73.675,
-    "wrist_roll": -68.719,
-    "gripper": -1.635
+    "shoulder_pan": -3.082,
+    "shoulder_lift": -65.206,
+    "elbow_flex": 47.647,
+    "wrist_flex": 68.705,
+    "wrist_roll": -81.457,
+    "gripper": -2.452
   },
   "note": "SO101 打靶前的安全展开姿态，单位度。home -> ready_pose 使用关节空间插值，不做笛卡尔直线 IK。"
 }
