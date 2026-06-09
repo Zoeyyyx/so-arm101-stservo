@@ -11,3 +11,8 @@ __pycache__/
 .env
 .pytest_cache/
 pytest-cache-files-*/
+.tmp-render/
+rendered_tictactoe_report/
+*.docx
+*.pptx
+*.pdf
